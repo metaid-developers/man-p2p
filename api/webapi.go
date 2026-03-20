@@ -134,6 +134,8 @@ func Start(f embed.FS) {
 	// MRC721 routes disabled in man-p2p phase 1 — asset parsing not enabled this phase
 	// r.GET("/mrc721/:page", mrc721List)
 	// r.GET("/mrc721/item/list/:name/:page", mrc721ItemList)
+	// P2P routes
+	RegisterP2PRoutes(r)
 	//btc json api
 	btcJsonApi(r)
 	// mrc20JsonApi(r) // disabled in man-p2p phase 1
