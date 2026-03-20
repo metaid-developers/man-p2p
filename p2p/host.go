@@ -27,11 +27,13 @@ func InitHost(ctx context.Context, dataDir string) error {
 		return fmt.Errorf("identity: %w", err)
 	}
 
-	Node, err = libp2p.New(
+	natOpts := NATOptions()
+	allOpts := append([]libp2p.Option{
 		libp2p.Identity(privKey),
 		libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"),
 		libp2p.NATPortMap(),
-	)
+	}, natOpts...)
+	Node, err = libp2p.New(allOpts...)
 	if err != nil {
 		return fmt.Errorf("libp2p.New: %w", err)
 	}
@@ -45,6 +47,7 @@ func InitHost(ctx context.Context, dataDir string) error {
 	}
 
 	go connectBootstrapNodes(ctx)
+	go InitMDNS(ctx)
 	return nil
 }
 
