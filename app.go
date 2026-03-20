@@ -2,11 +2,13 @@ package main
 
 import (
 	"embed"
+	"flag"
 	"fmt"
 	"log"
 	"man-p2p/api"
 	"man-p2p/common"
 	"man-p2p/man"
+	"man-p2p/p2p"
 	"man-p2p/pebblestore"
 	"time"
 )
@@ -29,7 +31,17 @@ func main() {
 	if common.ConfigFile != "" {
 		configPath = common.ConfigFile
 	}
+	var p2pConfigFile string
+	var p2pDataDir string
+	flag.StringVar(&p2pConfigFile, "p2p-config", "", "path to p2p sync config JSON file")
+	flag.StringVar(&p2pDataDir, "data-dir", "", "path to PebbleDB data directory")
 	common.InitConfig(configPath)
+	if p2pConfigFile != "" {
+		if err := p2p.LoadConfig(p2pConfigFile); err != nil {
+			log.Printf("warn: failed to load p2p config: %v", err)
+		}
+	}
+	_ = p2pDataDir
 	man.InitAdapter(common.Chain, common.Db, common.TestNet, common.Server)
 
 	// 显示运行模式
