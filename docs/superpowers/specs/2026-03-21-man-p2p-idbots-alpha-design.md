@@ -66,9 +66,10 @@ Alpha must include these capabilities:
    - Alpha does not require full pure-P2P historical completeness
 
 3. **Config path**
-   - `self`, `selective`, `full`
-   - block address/path rules
+   - address allow/block rules
+   - path allow/block rules
    - content size limit
+   - `self`, `selective`, `full` as policy presets built on top of those filter primitives
    - storage limit behavior
    - config reload endpoint
 
@@ -100,6 +101,7 @@ Alpha explicitly excludes:
 - P2P announce/receive flow
 - local persistence after receipt
 - configurable local HTTP port for same-machine multi-instance validation
+- source selection between existing local data, P2P peers, and built-in blockchain RPC indexing
 - config reload behavior
 - peer/status reporting
 - metadata-only handling for oversized content
@@ -161,16 +163,41 @@ For Alpha, realtime propagation is the main P2P success path:
    - stores metadata-only if oversized
 5. target node exposes the result through local HTTP APIs
 
-### 6.2 Historical Reads
+### 6.2 Data Source Model
+
+`man-p2p` is not a P2P-only process. For Alpha, it has three meaningful data sources:
+
+1. **local PebbleDB**
+   - fastest path
+   - serves already indexed or already synced data
+
+2. **P2P peers**
+   - primary source for realtime propagation
+   - opportunistic source for data available from other nodes
+
+3. **blockchain RPC/ZMQ path**
+   - inherited from MAN and still part of the default node behavior
+   - used to index directly from configured chain nodes
+   - does not need to be exposed as a user-facing UI configuration for Alpha
+
+This means Alpha should document the effective source priority as:
+
+- local data first inside `man-p2p`
+- P2P for newly propagated data
+- chain RPC indexing as the built-in authoritative ingestion path
+- centralized API fallback stays outside `man-p2p` and remains an IDBots responsibility
+
+### 6.3 Historical Reads
 
 Alpha historical behavior is intentionally pragmatic:
 
 - `man-p2p` serves what it already has locally
+- `man-p2p` may also continue to accumulate data from its configured chain RPC node, as inherited from MAN
 - IDBots falls back on cache miss or service miss
 
 This is sufficient for Alpha because it proves the local API contract without blocking on full historical P2P discovery.
 
-### 6.3 Status Semantics
+### 6.4 Status Semantics
 
 Alpha status must be useful, not pretend to be globally accurate.
 
@@ -188,17 +215,48 @@ Required status data:
 
 ## 7. Configuration Semantics
 
-### 7.1 Sync Modes
+The core design object is **filter primitives**, not the UI labels for sync modes.
 
-- `self`: only own-address data
-- `selective`: explicit address/path allow rules
-- `full`: no allow filter, still subject to block rules and storage limit
+For long-term MetaID usage, most users will not want to sync all PINs. The important engineering requirement is that the lower-level filtering module is correct, composable, and future-proof even if Alpha UI only exposes a simplified subset.
 
-### 7.2 Rule Priority
+### 7.1 Filter Primitives
+
+Alpha filtering must be built from three core constraints:
+
+- **address filter**
+  - allow specific creator addresses
+  - block specific creator addresses
+
+- **path filter**
+  - allow specific PIN paths or protocol prefixes
+  - block specific PIN paths or protocol prefixes
+
+- **size filter**
+  - allow full-body sync only below the configured threshold
+  - above the threshold, sync metadata only
+
+These primitives are more important than the initial UI and must remain independently testable.
+
+### 7.2 Sync Modes As Presets
+
+- `self`: a preset that mainly derives its allowlist from the node's own addresses
+- `selective`: a preset that enables explicit address/path allowlists
+- `full`: a preset with no allowlist restriction, but still subject to block rules and storage limit
+
+The important point is that these modes are only combinations of the underlying filter primitives. Future UI can evolve without forcing a redesign of the filtering engine.
+
+### 7.3 Rule Priority
 
 Block rules always win over allow rules.
 
-### 7.3 Oversized Content
+Expected semantics:
+
+- allow address + block address => blocked
+- allow path + block path => blocked
+- full mode + block rule => blocked
+- allowed by address or path + over size limit => metadata-only, not full body
+
+### 7.4 Oversized Content
 
 If content exceeds `p2p_max_content_size_kb`:
 
@@ -206,7 +264,7 @@ If content exceeds `p2p_max_content_size_kb`:
 - do not require body bytes to be present
 - let IDBots fall back for the body when needed
 
-### 7.4 Storage Limit
+### 7.5 Storage Limit
 
 When storage limit is reached:
 
