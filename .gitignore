@@ -5,3 +5,5 @@ metaid_cli/metaid-cli
 idaddress/idaddress.test
 idaddress/cmd/idaddr/idaddr
 mrc20_migration
+dist/
+man_p2p_data/
