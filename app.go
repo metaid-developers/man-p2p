@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"man-p2p/man"
 	"man-p2p/p2p"
 	"man-p2p/pebblestore"
+	"os"
 	"time"
 )
 
@@ -41,8 +43,43 @@ func main() {
 			log.Printf("warn: failed to load p2p config: %v", err)
 		}
 	}
-	_ = p2pDataDir
 	man.InitAdapter(common.Chain, common.Db, common.TestNet, common.Server)
+
+	// P2P initialization
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := p2pDataDir
+	if dataDir == "" {
+		dataDir = "./man_p2p_data"
+	}
+	os.MkdirAll(dataDir, 0700)
+
+	// Wire storage functions before RegisterSyncHandler
+	p2p.GetPinFn = func(pinId string) (*p2p.PinResponse, error) {
+		pinNode, err := man.PebbleStore.Database.GetPinInscriptionByKey(pinId)
+		if err != nil || pinNode.Id == "" {
+			return nil, fmt.Errorf("not found")
+		}
+		return &p2p.PinResponse{
+			PinId:     pinNode.Id,
+			Path:      pinNode.Path,
+			Address:   pinNode.Address,
+			Confirmed: pinNode.GenesisHeight > 0,
+			Content:   pinNode.ContentBody,
+		}, nil
+	}
+
+	if err := p2p.InitHost(ctx, dataDir); err != nil {
+		log.Printf("warn: p2p host init failed: %v", err)
+	} else {
+		if err := p2p.InitGossip(ctx); err != nil {
+			log.Printf("warn: p2p gossip init failed: %v", err)
+		}
+		p2p.RegisterSyncHandler()
+		p2p.StartStorageMonitor(ctx, dataDir)
+		log.Printf("P2P node started: %s", p2p.Node.ID())
+	}
 
 	// 显示运行模式
 	modeInfo := ""

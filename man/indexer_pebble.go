@@ -1,11 +1,13 @@
 package man
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
 	"man-p2p/adapter/dogecoin"
 	"man-p2p/common"
+	"man-p2p/p2p"
 	"man-p2p/pebblestore"
 
 	"man-p2p/pin"
@@ -65,6 +67,16 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 		tmp := (*pinList)[0]
 		blockKey := fmt.Sprintf("blocktime_%s_%d", chainName, height)
 		pd.Database.CountSet(blockKey, tmp.Timestamp)
+		// Broadcast new PINs via P2P GossipSub
+		for _, pinNode := range *pinList {
+			p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
+				PinId:     pinNode.Id,
+				Path:      pinNode.Path,
+				Address:   pinNode.Address,
+				Confirmed: pinNode.GenesisHeight > 0,
+				SizeBytes: int64(pinNode.ContentLength),
+			})
+		}
 	}
 
 	//处理modify/revoke操作
