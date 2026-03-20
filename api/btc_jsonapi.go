@@ -43,6 +43,12 @@ func btcJsonApi(r *gin.Engine) {
 	btcGroup.GET("/info/address/:address", getInfoByAddress)
 	btcGroup.GET("/info/metaid/:metaId", getInfoByMetaId)
 
+	// Alias routes for IDBots compatibility (spec section 5.2)
+	v1 := r.Group("/api/v1")
+	v1.Use(CorsMiddleware())
+	v1.GET("/users/info/metaid/:metaId", getInfoByMetaId)
+	v1.GET("/users/info/address/:address", getInfoByAddress)
+
 }
 
 func metaidList(ctx *gin.Context) {
