@@ -105,6 +105,9 @@ func Start(f embed.FS) {
 	r.Use(cors.New(config))
 	// Swagger
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	r.GET("/health", func(ctx *gin.Context) {
+		ctx.JSON(200, gin.H{"status": "ok", "version": common.Version})
+	})
 	//r.LoadHTMLGlob("./web/template/**/*")
 	//r.Static("/assets", "./web/static")
 	r.GET("/", home)
