@@ -5,16 +5,6 @@ import (
 	"strings"
 )
 
-// PinAnnouncement represents a PIN broadcast received from a peer.
-// NOTE: This struct is temporarily defined here until gossip.go is implemented.
-// When gossip.go is added, this definition must be removed to avoid a redeclaration error.
-type PinAnnouncement struct {
-	PinId     string
-	Address   string
-	Path      string
-	SizeBytes int64
-}
-
 // ShouldSync returns true if the PIN announcement passes the sync filter.
 // MaxContentSizeKB is NOT checked here — oversized PINs still sync (metadata only).
 func ShouldSync(ann PinAnnouncement) bool {
