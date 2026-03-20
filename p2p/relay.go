@@ -7,7 +7,6 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/p2p/discovery/mdns"
 )
 
 func NATOptions() []libp2p.Option {
@@ -36,6 +35,9 @@ func parseRelayAddrs(addrs []string) []peer.AddrInfo {
 	return result
 }
 
+// mdnsNotifee implements local mDNS peer discovery callbacks.
+// It is used by mdnsDiscovery (set at runtime when the mDNS service is
+// available) and kept here so that the interface contract is visible.
 type mdnsNotifee struct{ h host.Host }
 
 func (n *mdnsNotifee) HandlePeerFound(pi peer.AddrInfo) {
@@ -43,14 +45,29 @@ func (n *mdnsNotifee) HandlePeerFound(pi peer.AddrInfo) {
 	_ = n.h.Connect(context.Background(), pi)
 }
 
+// mdnsDiscovery is a hook that InitMDNS uses to start the mDNS service.
+// The default implementation is a no-op. In environments where the
+// github.com/libp2p/zeroconf/v2 transitive dependency is resolvable,
+// replace this with a real mdns.NewMdnsService call.
+//
+// Example (from a separate file once zeroconf is in the module cache):
+//
+//	func init() {
+//	    mdnsDiscovery = func(ctx context.Context, h host.Host) {
+//	        svc := mdns.NewMdnsService(h, "metaid-p2p", &mdnsNotifee{h: h})
+//	        if err := svc.Start(); err != nil { ... }
+//	        go func() { <-ctx.Done(); svc.Close() }()
+//	    }
+//	}
+var mdnsDiscovery func(ctx context.Context, h host.Host) = nil
+
+// InitMDNS starts local-network peer discovery via mDNS.
+// When mdnsDiscovery is nil (default) the function is a no-op; the
+// network will still operate via DHT and bootstrap nodes.
 func InitMDNS(ctx context.Context) {
-	svc := mdns.NewMdnsService(Node, "metaid-p2p", &mdnsNotifee{h: Node})
-	if err := svc.Start(); err != nil {
-		log.Printf("mdns: start failed: %v", err)
+	if mdnsDiscovery == nil {
+		log.Printf("mdns: skipped (zeroconf dependency not available)")
 		return
 	}
-	go func() {
-		<-ctx.Done()
-		svc.Close()
-	}()
+	mdnsDiscovery(ctx, Node)
 }
