@@ -1,0 +1,1384 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "MetaID Indexer API",
+    "description": "Multi-chain blockchain indexer API for MetaID protocol. Indexes PIN inscriptions and MRC20 token operations across Bitcoin, Dogecoin, and MicroVision Chain.",
+    "version": "2.0.0",
+    "contact": {
+      "name": "MetaID Team"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development server"
+    }
+  ],
+  "paths": {
+    "/api/metaid/list": {
+      "get": {
+        "summary": "Get MetaID list",
+        "description": "Retrieve a paginated list of MetaIDs",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pin/list": {
+      "get": {
+        "summary": "Get PIN list",
+        "description": "Retrieve a paginated list of PIN inscriptions",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "lastId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mempool/list": {
+      "get": {
+        "summary": "Get mempool PIN list",
+        "description": "Retrieve unconfirmed transactions from mempool",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/notifcation/list": {
+      "get": {
+        "summary": "Get notification list",
+        "description": "Retrieve notifications for an address",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lastId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/pin/{numberOrId}": {
+      "get": {
+        "summary": "Get PIN by ID",
+        "description": "Retrieve a specific PIN by number or ID",
+        "parameters": [
+          {
+            "name": "numberOrId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/pin/ver/{pinid}/{ver}": {
+      "get": {
+        "summary": "Get PIN history version",
+        "description": "Retrieve a specific version of a PIN",
+        "parameters": [
+          {
+            "name": "pinid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ver",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/pin/path/list": {
+      "get": {
+        "summary": "Get PINs by path",
+        "description": "Retrieve all PINs for a specific path",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/address/pin/list/{address}": {
+      "get": {
+        "summary": "Get PINs by address",
+        "description": "Retrieve all PINs for a specific address",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/metaid/pin/list/{metaid}": {
+      "get": {
+        "summary": "Get PINs by MetaID",
+        "description": "Retrieve all PINs for a specific MetaID and path",
+        "parameters": [
+          {
+            "name": "metaid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/info/address/{address}": {
+      "get": {
+        "summary": "Get address info",
+        "description": "Get MetaID information by address",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/info/metaid/{metaId}": {
+      "get": {
+        "summary": "Get MetaID info",
+        "description": "Get MetaID information by MetaID",
+        "parameters": [
+          {
+            "name": "metaId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/block/file": {
+      "get": {
+        "summary": "Get block file",
+        "description": "Download block data file",
+        "parameters": [
+          {
+            "name": "height",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "chain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "part",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File download"
+          }
+        }
+      }
+    },
+    "/api/block/file/partCount": {
+      "get": {
+        "summary": "Get block file part count",
+        "description": "Get number of shard files for a block"
+      }
+    },
+    "/api/block/file/create": {
+      "get": {
+        "summary": "Create block file",
+        "description": "Create block data file for height range (admin)",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/block/id/list": {
+      "get": {
+        "summary": "Get block ID list",
+        "description": "Get PIN IDs for a block (admin)",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chain",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/block/id/create": {
+      "get": {
+        "summary": "Create block ID list",
+        "description": "Create PIN ID list for height range (admin)"
+      }
+    },
+    "/api/mrc20/tick/all": {
+      "get": {
+        "summary": "Get all MRC20 tokens",
+        "description": "Retrieve all MRC20 token tickers",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/tick/info/{id}": {
+      "get": {
+        "summary": "Get MRC20 token info by ID",
+        "description": "Get token information by tick ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/tick/info": {
+      "get": {
+        "summary": "Get MRC20 token info",
+        "description": "Get token information by ID or tick name",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tick",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/tick/address": {
+      "get": {
+        "summary": "Get MRC20 history by address",
+        "description": "Get MRC20 transaction history for an address across all tokens or specific token",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "tickId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "address",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "verify",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/tick/history": {
+      "get": {
+        "summary": "Get MRC20 history by token",
+        "description": "Get global MRC20 transaction history for a token",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "tickId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/address/balance/{address}": {
+      "get": {
+        "summary": "Get MRC20 balance by address",
+        "description": "Get all MRC20 token balances for an address",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "chain",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/address/history/{tickId}/{address}": {
+      "get": {
+        "summary": "Get MRC20 address history",
+        "description": "Get MRC20 transaction history for specific token and address",
+        "parameters": [
+          {
+            "name": "tickId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/tx/history": {
+      "get": {
+        "summary": "Get MRC20 transaction by TX ID",
+        "description": "Get MRC20 UTXO information by transaction ID",
+        "parameters": [
+          {
+            "name": "txId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "index",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/tick/AddressBalance": {
+      "get": {
+        "summary": "Get MRC20 balance",
+        "description": "Get MRC20 balance for specific token and address",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tickId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "chain",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "btc"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/admin/index-height/{chain}": {
+      "get": {
+        "summary": "Get MRC20 index height",
+        "description": "Get current MRC20 indexing height for a chain (admin)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          }
+        }
+      }
+    },
+    "/api/mrc20/admin/index-height/{chain}/set": {
+      "get": {
+        "summary": "Set MRC20 index height",
+        "description": "Set MRC20 indexing height for a chain (admin)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "height",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "reason",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/reindex-block/{chain}/{height}": {
+      "get": {
+        "summary": "Reindex single block",
+        "description": "Reindex a single block (admin)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "height",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/reindex-range/{chain}/{start}/{end}": {
+      "get": {
+        "summary": "Reindex block range",
+        "description": "Reindex a range of blocks (admin, max 100 blocks)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "start",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/reindex-from/{chain}/{height}": {
+      "get": {
+        "summary": "Reindex from height",
+        "description": "Reindex from a specific height (admin, idempotent)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "height",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/recalculate-balance/{chain}/{address}/{tickId}": {
+      "get": {
+        "summary": "Recalculate balance",
+        "description": "Recalculate MRC20 balance for address (admin)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tickId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/verify-balance/{chain}/{address}/{tickId}": {
+      "get": {
+        "summary": "Verify balance",
+        "description": "Verify MRC20 balance matches UTXO (admin)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tickId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/fix-pending/{chain}": {
+      "get": {
+        "summary": "Fix pending UTXOs",
+        "description": "Fix pending status UTXOs for a chain (admin)",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": ["btc", "doge", "mvc"]
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/teleport/list-pending": {
+      "get": {
+        "summary": "List pending teleports (V1 deprecated)",
+        "description": "List all pending teleport transactions (deprecated, use V2)"
+      }
+    },
+    "/api/mrc20/admin/teleport/diagnose/{coord}": {
+      "get": {
+        "summary": "Diagnose teleport (V1 deprecated)",
+        "description": "Diagnose a specific teleport transaction (deprecated, use V2)",
+        "parameters": [
+          {
+            "name": "coord",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/teleport/check-arrival/{pinId}": {
+      "get": {
+        "summary": "Check arrival by PIN ID",
+        "description": "Check if arrival exists for a specific PIN ID (admin)",
+        "parameters": [
+          {
+            "name": "pinId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/teleport/check-asset-index/{assetOutpoint}": {
+      "get": {
+        "summary": "Check asset index",
+        "description": "Check asset outpoint index status (admin)",
+        "parameters": [
+          {
+            "name": "assetOutpoint",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/teleport/fix/{coord}": {
+      "post": {
+        "summary": "Fix teleport",
+        "description": "Fix a specific teleport transaction (admin)",
+        "parameters": [
+          {
+            "name": "coord",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/teleport/v2/list": {
+      "get": {
+        "summary": "List teleport transactions (V2)",
+        "description": "List all teleport transactions using V2 architecture",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/teleport/v2/detail/{id}": {
+      "get": {
+        "summary": "Get teleport transaction detail (V2)",
+        "description": "Get detailed information of a teleport transaction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/verify/supply/{tickId}": {
+      "get": {
+        "summary": "Verify token supply",
+        "description": "Verify total supply for a specific token (admin)",
+        "parameters": [
+          {
+            "name": "tickId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/verify/all": {
+      "get": {
+        "summary": "Verify all token supplies",
+        "description": "Verify total supply for all tokens (admin)"
+      }
+    },
+    "/api/mrc20/admin/snapshot/create": {
+      "post": {
+        "summary": "Create snapshot",
+        "description": "Create a database snapshot (admin)",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/mrc20/admin/snapshot/list": {
+      "get": {
+        "summary": "List snapshots",
+        "description": "List all database snapshots (admin)"
+      }
+    },
+    "/api/mrc20/admin/snapshot/info/{id}": {
+      "get": {
+        "summary": "Get snapshot info",
+        "description": "Get detailed information of a snapshot (admin)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/snapshot/restore/{id}": {
+      "post": {
+        "summary": "Restore snapshot",
+        "description": "Restore from a snapshot (admin, WARNING: clears existing data)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/admin/snapshot/{id}": {
+      "delete": {
+        "summary": "Delete snapshot",
+        "description": "Delete a snapshot (admin)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/debug/pending-in/{address}": {
+      "get": {
+        "summary": "Debug pending in",
+        "description": "View all TransferPendingIn records for an address (debug)",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/mrc20/debug/utxo-status/{address}/{tickId}": {
+      "get": {
+        "summary": "Debug UTXO status",
+        "description": "View UTXO status for address and tick (debug)",
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tickId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

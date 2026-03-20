@@ -1,0 +1,145 @@
+{{ define "home/mrc20addrhistory.html" }}
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<!-- Head -->
+{{ template "public/head.html"}}
+<!-- End Head -->
+
+<body>
+  <!-- Header (Topbar) -->
+  {{ template "public/header.html"}}
+  <!-- End Header (Topbar) -->
+
+  <main class="u-main" role="main">
+    <!-- Sidebar -->
+    {{ template "public/aside.html" }}
+    <!-- End Sidebar -->
+    <div class="u-content">
+      <div class="u-body" style="min-height: 500px;">
+        <h2>#{{ .TickName }} - Address History</h2>
+        <p style="color: #666; word-break: break-all; margin-bottom: 20px;">
+          <strong>Address:</strong> {{ .Address }}
+        </p>
+        
+        <div class="mb-3">
+          <a href="/mrc20/holders/{{ .TickId }}/1" class="btn" style="background: #333; color: white; border: none; padding: 6px 16px; border-radius: 4px; text-decoration: none;">← Back to Holders</a>
+        </div>
+
+        <div>
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th scope="col">Height</th>
+                  <th scope="col">Direction</th>
+                  <th scope="col">Amount</th>
+                  <th scope="col">TxPoint</th>
+                  <th scope="col">Operation</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Counterparty</th>
+                  <th scope="col">Chain</th>
+                  <th scope="col">Message</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {{ range $v := .List }}
+                <tr>
+                  <td>{{ $v.BlockHeight }}</td>
+                  <td>
+                    {{ if eq $v.Direction "in" }}
+                    <span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                      ↓ In{{ if $v.IsChange }} (Change){{ end }}
+                    </span>
+                    {{ else if eq $v.Direction "out" }}
+                    <span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">↑ Out</span>
+                    {{ else }}
+                    <span style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">--</span>
+                    {{ end }}
+                  </td>
+                  <td style="font-weight: bold;">
+                    {{ if eq $v.Direction "in" }}
+                    <span style="color: #10b981;">+{{ $v.Amount }}</span>
+                    {{ else if eq $v.Direction "out" }}
+                    <span style="color: #ef4444;">-{{ $v.Amount }}</span>
+                    {{ else }}
+                    {{ $v.Amount }}
+                    {{ end }}
+                  </td>
+                  <td style="word-break: break-all; max-width: 150px; font-size: 12px;">
+                    <a href="/tx/{{ $v.Chain}}/{{$v.TxId}}" style="color: #3b82f6;">{{ $v.TxPoint | formatAddress }}</a>
+                  </td>
+                  <td>
+                    {{ if eq $v.TxType "mint" }}
+                    <span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Mint</span>
+                    {{ else if eq $v.TxType "transfer" }}
+                    <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Transfer</span>
+                    {{ else if eq $v.TxType "data-transfer" }}
+                    <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Transfer</span>
+                    {{ else if eq $v.TxType "native_transfer" }}
+                    <span style="background: #eab308; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Native</span>
+                    {{ else if eq $v.TxType "teleport_pending" }}
+                    <span style="background: #f97316; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Teleport Pending</span>
+                    {{ else if eq $v.TxType "teleport_out" }}
+                    <span style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Teleport Out</span>
+                    {{ else if eq $v.TxType "teleport_in" }}
+                    <span style="background: #a855f7; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Teleport In</span>
+                    {{ else }}
+                    <span style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">{{ $v.TxType }}</span>
+                    {{ end }}
+                  </td>
+                  <td>
+                    {{ if eq $v.Status 1 }}
+                    <span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">✓ Success</span>
+                    {{ else if eq $v.Status -1 }}
+                    <span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">✗ Failed</span>
+                    {{ else }}
+                    <span style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">Unknown</span>
+                    {{ end }}
+                  </td>
+                  <td style="font-size: 12px;">
+                    {{ if eq $v.Direction "in" }}
+                      {{ if $v.FromAddress }}from: {{ $v.FromAddress | formatAddress }}{{ end }}
+                    {{ else }}
+                      {{ if $v.ToAddress }}to: {{ $v.ToAddress | formatAddress }}{{ end }}
+                    {{ end }}
+                  </td>
+                  <td style="font-size: 11px;">{{ $v.Chain }}</td>
+                  <td style="font-size: 11px; max-width: 200px; word-wrap: break-word; color: {{ if $v.Msg }}#ef4444{{ else }}#666{{ end }};">
+                    {{ if $v.Msg }}{{ $v.Msg }}{{ else }}-{{ end }}
+                  </td>
+                </tr>
+                {{ end }}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {{ if eq (len .List) 0 }}
+        <div class="alert alert-info">
+          No history found for this address.
+        </div>
+        {{ end }}
+      </div>
+      <div style="margin-left: 40px;font-size: 18px;margin-bottom: 20px;">
+        {{if eq .PrePage 0}}
+        Prev
+        {{else}}
+        <a href="/mrc20/address/{{.TickId}}/{{.Address}}/{{.PrePage}}" class="link">Prev</a>
+        {{end}}
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+        {{if eq .NextPage 0}}
+        Next
+        {{else}}
+        <a href="/mrc20/address/{{.TickId}}/{{.Address}}/{{.NextPage}}" class="link">Next</a>
+        {{end}}
+      </div>
+      <!-- Footer -->
+      {{ template "public/footer.html"}}
+      <!-- End Footer -->
+    </div>
+  </main>
+</body>
+
+</html>
+{{ end }}

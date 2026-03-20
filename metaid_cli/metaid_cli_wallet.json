@@ -1,0 +1,11 @@
+{
+  "addresses": [
+    {
+      "address": "bcrt1p32cqqe8dyjqpcekllrvqgt7yajjme52v6jwy5p4sz35phrz0myuq9vnars",
+      "privateKey": "7df5c6822c2696eec0e61dc0037a77835bcbd7d3c72865fe647babf32d2b7489",
+      "type": "taproot",
+      "network": "regtest"
+    }
+  ],
+  "utxos": []
+}

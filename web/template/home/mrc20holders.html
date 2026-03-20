@@ -1,0 +1,91 @@
+{{ define "home/mrc20holders.html" }}
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<!-- Head -->
+{{ template "public/head.html"}}
+<!-- End Head -->
+
+<body>
+  <!-- Header (Topbar) -->
+  {{ template "public/header.html"}}
+  <!-- End Header (Topbar) -->
+
+  <main class="u-main" role="main">
+    <!-- Sidebar -->
+    {{ template "public/aside.html" }}
+    <!-- End Sidebar -->
+    <div class="u-content">
+      <div class="u-body" style="min-height: 500px;">
+        <h2>#{{ .TickName }} Holders</h2>
+        
+        <!-- Search Form -->
+        <div class="mb-4">
+          <form action="/mrc20/holders/{{ .TickId }}/1" method="GET" class="form-inline">
+            <div class="d-flex align-items-center" style="gap: 8px;">
+              <input type="text" name="address" class="form-control" placeholder="Search by address..." value="{{ .SearchAddress }}" style="width: 400px; border: 1px solid #333; border-radius: 4px;">
+              <button type="submit" class="btn" style="background: #333; color: white; border: none; padding: 6px 16px; border-radius: 4px;">Search</button>
+              {{ if .SearchAddress }}
+              <a href="/mrc20/holders/{{ .TickId }}/1" class="btn" style="background: #666; color: white; border: none; padding: 6px 16px; border-radius: 4px;">Clear</a>
+              {{ end }}
+            </div>
+          </form>
+        </div>
+
+        <div>
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Address</th>
+                  <th scope="col">Balance</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {{ range $i, $v := .List }}
+                <tr>
+                  <td>{{ add $.Offset $i 1 }}</td>
+                  <td style="word-break: break-all;"><a href="/mrc20/address/{{ $.TickId }}/{{ $v.Address }}/1" style="color: #333;">{{ $v.Address }}</a></td>
+                  <td>{{ $v.Balance }}</td>
+                </tr>
+                {{ end }}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {{ if eq (len .List) 0 }}
+        <div class="alert alert-info">
+          {{ if .SearchAddress }}
+          No holders found for address: {{ .SearchAddress }}
+          {{ else }}
+          No holders found for this token.
+          {{ end }}
+        </div>
+        {{ end }}
+      </div>
+      <div style="margin-left: 40px;font-size: 18px;margin-bottom: 20px;">
+        {{if eq .PrePage 0}}
+        Prev
+        {{else}}
+        <a href="/mrc20/holders/{{.TickId}}/{{.PrePage}}{{ if .SearchAddress }}?address={{.SearchAddress}}{{ end }}" class="link">Prev</a>
+        {{end}}
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+        {{if eq .NextPage 0}}
+        Next
+        {{else}}
+        <a href="/mrc20/holders/{{.TickId}}/{{.NextPage}}{{ if .SearchAddress }}?address={{.SearchAddress}}{{ end }}" class="link">Next</a>
+        {{end}}
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+        <a href="/mrc20/info/{{.TickId}}" class="link">Back to Info</a>
+      </div>
+      <!-- Footer -->
+      {{ template "public/footer.html"}}
+      <!-- End Footer -->
+    </div>
+  </main>
+</body>
+
+</html>
+{{end}}

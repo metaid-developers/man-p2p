@@ -1,0 +1,15 @@
+chain: btc
+network: regtest
+wallet_file: btc_wallet.json
+paths:
+    - /info/name
+    - /info/avatar
+    - /info/name
+    - /protocols/simplenote
+rpc:
+    host: 192.168.1.24
+    port: 18443
+    user: test
+    password: test
+    use_tls: false
+    wallet: metaid-watch

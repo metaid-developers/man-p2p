@@ -1,0 +1,128 @@
+{{ define "home/mrc20info.html" }}
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<!-- Head -->
+{{ template "public/head.html"}}
+<!-- End Head -->
+
+<body>
+  <!-- Header (Topbar) -->
+  {{ template "public/header.html"}}
+  <!-- End Header (Topbar) -->
+
+  <main class="u-main" role="main">
+    <!-- Sidebar -->
+    {{ template "public/aside.html" }}
+    <!-- End Sidebar -->
+    <div class="u-content">
+      <div class="u-body" style="min-height: 500px;">
+        <h1>#{{ .Tick.Tick }} Token Info</h1>
+        
+        <div class="card mb-4">
+          <div class="card-body">
+            <div class="row">
+              <div class="col-md-6">
+                <table class="table table-borderless">
+                  <tr>
+                    <td style="width: 140px;"><b>Tick:</b></td>
+                    <td>{{ .Tick.Tick }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Token Name:</b></td>
+                    <td>{{ .Tick.TokenName }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Mrc20 ID:</b></td>
+                    <td style="word-break: break-all;"><a href="/pin/{{ .Tick.Mrc20Id }}">{{ .Tick.Mrc20Id }}</a></td>
+                  </tr>
+                  <tr>
+                    <td><b>Decimals:</b></td>
+                    <td>{{ .Tick.Decimals }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Amount Per Mint:</b></td>
+                    <td>{{ .Tick.AmtPerMint }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Mint Count:</b></td>
+                    <td>{{ .Tick.MintCount }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Premine Count:</b></td>
+                    <td>{{ .Tick.PremineCount }}</td>
+                  </tr>
+                </table>
+              </div>
+              <div class="col-md-6">
+                <table class="table table-borderless">
+                  <tr>
+                    <td style="width: 140px;"><b>Total Minted:</b></td>
+                    <td>{{ .Tick.TotalMinted }} / {{ .Tick.MintCount }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Chain:</b></td>
+                    <td>{{ .Tick.Chain }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Deploy Address:</b></td>
+                    <td style="word-break: break-all;">{{ .Tick.Address }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Deploy Time:</b></td>
+                    <td>{{ .Tick.DeployTime | formatTime }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>Begin Height:</b></td>
+                    <td>{{ if .Tick.BeginHeight }}{{ .Tick.BeginHeight }}{{ else }}-{{ end }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>End Height:</b></td>
+                    <td>{{ if .Tick.EndHeight }}{{ .Tick.EndHeight }}{{ else }}-{{ end }}</td>
+                  </tr>
+                  <tr>
+                    <td><b>MetaID:</b></td>
+                    <td style="word-break: break-all;">{{ if .Tick.MetaId }}<a href="/metaid/{{ .Tick.MetaId }}">{{ .Tick.MetaId }}</a>{{ else }}-{{ end }}</td>
+                  </tr>
+                </table>
+              </div>
+            </div>
+            
+            {{ if or .Tick.PinCheck.Creator .Tick.PinCheck.Lv .Tick.PinCheck.Count .Tick.PinCheck.Path }}
+            <h5>Pin Check</h5>
+            <table class="table table-sm">
+              <tr>
+                <td><b>Creator:</b> {{ .Tick.PinCheck.Creator }}</td>
+                <td><b>Level:</b> {{ .Tick.PinCheck.Lv }}</td>
+                <td><b>Count:</b> {{ .Tick.PinCheck.Count }}</td>
+                <td><b>Path:</b> {{ .Tick.PinCheck.Path }}</td>
+              </tr>
+            </table>
+            {{ end }}
+            
+            {{ if or .Tick.PayCheck.PayTo .Tick.PayCheck.PayAmount }}
+            <h5>Pay Check</h5>
+            <table class="table table-sm">
+              <tr>
+                <td><b>Pay To:</b> {{ .Tick.PayCheck.PayTo }}</td>
+                <td><b>Pay Amount:</b> {{ .Tick.PayCheck.PayAmount }}</td>
+              </tr>
+            </table>
+            {{ end }}
+            
+            <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee;">
+              <a href="/mrc20/holders/{{ .Tick.Mrc20Id }}/1" style="color: #28a745; text-decoration: none; margin-right: 20px;">Holders</a>
+              <a href="/mrc20/history/{{ .Tick.Mrc20Id }}/1" style="color: #17a2b8; text-decoration: none; margin-right: 20px;">History</a>
+              <a href="/mrc20/1" style="color: #6c757d; text-decoration: none;">Back to List</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Footer -->
+      {{ template "public/footer.html"}}
+      <!-- End Footer -->
+    </div>
+  </main>
+</body>
+
+</html>
+{{end}}

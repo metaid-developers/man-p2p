@@ -1,0 +1,100 @@
+# Dogecoin Configuration Example for man-indexer-v2
+
+protocolID = "6d6574616964"
+
+[sync]
+syncAllData = false
+syncProtocols = []
+syncBeginTime = ""
+syncEndTime = ""
+reSyncNum = 0
+isFullNode = false
+
+module = []
+syncHost = ["*"]
+blockedHost = []
+cacheUrl = ""
+syncDB = ""
+adminToken = ""
+
+# Bitcoin Configuration (Regtest)
+[btc]
+initialHeight = 0
+mrc20Height = 0
+rpcHost = "127.0.0.1:18443"
+rpcUser = "test"
+rpcPass = "test"
+rpcHttpPostMode = true
+rpcDisableTLS = true
+zmqHost = "tcp://127.0.0.1:28333"
+popCutNum = 0
+
+# MVC Configuration
+[mvc]
+initialHeight = 86500
+mrc20Height = 0
+rpcHost = "127.0.0.1:9882"
+rpcUser = "mvc"
+rpcPass = "password"
+zmqHost = "tcp://127.0.0.1:28882"
+rpcHttpPostMode = true
+rpcDisableTLS = true
+
+popCutNum = 21
+
+# Dogecoin Configuration
+[doge]
+initialHeight = 6007225  # Set your initial block height
+mrc20Height = 0
+# For Dogecoin Regtest (active):
+#rpcHost = "127.0.0.1:18332"
+#rpcUser = "dogeuser"
+#rpcPass = "dogepass"
+#rpcHttpPostMode = true
+#rpcDisableTLS = true
+#zmqHost = "tcp://127.0.0.1:28444"
+#popCutNum = 0
+
+# For Dogecoin Mainnet, use:
+rpcHost = "127.0.0.1:22555"
+rpcUser = "REPLACE_ME"
+rpcPass = "REPLACE_ME"
+rpcHttpPostMode = true
+rpcDisableTLS = true
+zmqHost = "tcp://127.0.0.1:28555"
+popCutNum = 21
+
+# For Dogecoin Testnet, use:
+# rpcHost = "127.0.0.1:44555"
+# zmqHost = "tcp://127.0.0.1:44556"
+
+[mongoDb]
+mongoURI = "mongodb://localhost:27017"
+poolSize = 100
+timeOut = 10
+dbName = "metaid"
+
+[pebble]
+dir = "./man_base_data_pebble"
+num = 2
+
+[web]
+port = "0.0.0.0:7777"
+pemFile = ""
+keyFile = ""
+host = "localhost"
+
+[metaSo]
+pubkey = ""
+prikey = ""
+mongoNodeURI = ""
+syncMode = ""
+onlyHost = ""
+feeRateHost = ""
+feeLimit = 0
+notifcationBlackedHost = []
+
+[statistics]
+metaChainHost = ""
+allowHost = []
+allowProtocols = []

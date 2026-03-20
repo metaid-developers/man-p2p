@@ -1,0 +1,14 @@
+chain: doge
+network: regtest
+wallet_file: doge_wallet.json
+rpc:
+    host: 192.168.1.24
+    port: 18332
+    user: dogeuser
+    password: dogepass
+    use_tls: false
+paths:
+    - /info/name
+    - /info/avatar
+    - /info/name
+    - /protocols/simplenote

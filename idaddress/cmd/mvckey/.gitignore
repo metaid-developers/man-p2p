@@ -1,0 +1,10 @@
+# 忽略包含私钥的文件
+test_account_*.json
+*.key
+*.wif
+*.pem
+keypair.txt
+
+# 忽略编译产物
+mvckey
+*.exe

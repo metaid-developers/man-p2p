@@ -1,0 +1,72 @@
+protocolID = "6d6574616964"
+module = []
+syncHost = ["*"]
+blockedHost = []
+syncDB = "./sync_data.db"
+adminToken = ""
+
+[sync]
+syncAllData = true
+syncBeginTime = ""
+syncEndTime = ""
+syncProtocols = []
+reSyncNum = 0
+isFullNode = true
+
+[statistics]
+metaChainHost = ""
+allowHost = ["*"]
+allowProtocols = ["*"]
+
+[btc]
+initialHeight = 0
+mrc20Height = 0
+rpcHost = "127.0.0.1:8332"
+rpcUser = ""
+rpcPass = ""
+rpcHttpPostMode = true
+rpcDisableTLS = true
+zmqHost = "tcp://127.0.0.1:28332"
+popCutNum = 21
+
+[mvc]
+initialHeight = 161000
+mrc20Height = 0
+rpcHost = "8.217.120.15:9882"
+rpcUser = "showpay"
+rpcPass = "showpay88.."
+rpcHttpPostMode = true
+rpcDisableTLS = true
+zmqHost = "tcp://8.217.120.15:15555"
+popCutNum = 21
+
+[doge]
+initialHeight = 0
+mrc20Height = 0
+rpcHost = "127.0.0.1:22555"
+rpcUser = ""
+rpcPass = ""
+rpcHttpPostMode = true
+rpcDisableTLS = true
+zmqHost = "tcp://127.0.0.1:28555"
+popCutNum = 21
+
+[pebble]
+dir = "/Users/tusm/Downloads/working/man-data"
+num = 4
+
+[web]
+port = ":7777"
+pemFile = ""
+keyFile = ""
+host = "http://127.0.0.1:7777"
+
+[metaSo]
+pubkey = ""
+prikey = ""
+mongoNodeURI = ""
+syncMode = ""
+onlyHost = ""
+feeRateHost = ""
+feeLimit = 0
+notifcationBlackedHost = []
