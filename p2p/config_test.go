@@ -62,3 +62,23 @@ func TestReloadConfig(t *testing.T) {
 		t.Errorf("expected full after reload, got %s", got.SyncMode)
 	}
 }
+
+func TestChainSourceDefaultsToEnabled(t *testing.T) {
+	path := writeTempConfig(t, `{}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	if !GetConfig().ChainSourceEnabled() {
+		t.Fatal("expected chain source to default to enabled")
+	}
+}
+
+func TestLoadConfigCanDisableChainSource(t *testing.T) {
+	path := writeTempConfig(t, `{"p2p_enable_chain_source": false}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	if GetConfig().ChainSourceEnabled() {
+		t.Fatal("expected chain source to be disabled by config")
+	}
+}

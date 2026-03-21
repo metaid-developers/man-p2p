@@ -43,7 +43,8 @@ func main() {
 			log.Printf("warn: failed to load p2p config: %v", err)
 		}
 	}
-	man.InitAdapter(common.Chain, common.Db, common.TestNet, common.Server)
+	chainSourceEnabled := p2p.GetConfig().ChainSourceEnabled()
+	man.InitRuntime(common.Chain, common.Db, common.TestNet, common.Server, chainSourceEnabled)
 
 	// P2P initialization
 	ctx, cancel := context.WithCancel(context.Background())
@@ -55,20 +56,7 @@ func main() {
 	}
 	os.MkdirAll(dataDir, 0700)
 
-	// Wire storage functions before RegisterSyncHandler
-	p2p.GetPinFn = func(pinId string) (*p2p.PinResponse, error) {
-		pinNode, err := man.PebbleStore.Database.GetPinInscriptionByKey(pinId)
-		if err != nil || pinNode.Id == "" {
-			return nil, fmt.Errorf("not found")
-		}
-		return &p2p.PinResponse{
-			PinId:     pinNode.Id,
-			Path:      pinNode.Path,
-			Address:   pinNode.Address,
-			Confirmed: pinNode.GenesisHeight > 0,
-			Content:   pinNode.ContentBody,
-		}, nil
-	}
+	configureP2PCallbacks()
 
 	if err := p2p.InitHost(ctx, dataDir); err != nil {
 		log.Printf("warn: p2p host init failed: %v", err)
@@ -91,7 +79,9 @@ func main() {
 	if common.Server == "1" {
 		go api.Start(f)
 	}
-	go man.ZmqRun()
+	if chainSourceEnabled {
+		go man.ZmqRun()
+	}
 
 	// MRC20 catch-up disabled in man-p2p phase 1 — asset parsing not enabled this phase
 	// man.Mrc20CatchUpRun()
@@ -101,12 +91,14 @@ func main() {
 	go pebblestore.StatPinSort(man.PebbleStore.Database)
 
 	for {
-		man.IndexerRun(common.TestNet)
+		if chainSourceEnabled {
+			man.IndexerRun(common.TestNet)
 
-		// MRC20 catch-up disabled in man-p2p phase 1
-		// man.Mrc20CatchUpRun()
+			// MRC20 catch-up disabled in man-p2p phase 1
+			// man.Mrc20CatchUpRun()
 
-		man.CheckNewBlock()
+			man.CheckNewBlock()
+		}
 		time.Sleep(time.Second * 10)
 	}
 }

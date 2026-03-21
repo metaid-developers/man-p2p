@@ -1,9 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"man-p2p/api/respond"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,11 +26,19 @@ func TestP2PStatusEndpoint(t *testing.T) {
 	if w.Code != 200 {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
-	if body := w.Body.String(); len(body) == 0 {
-		t.Error("expected non-empty body")
+	var res respond.ApiResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("expected valid json response: %v", err)
 	}
-	if body := w.Body.String(); !contains(body, "peerCount") {
-		t.Errorf("expected peerCount in response, got: %s", body)
+	if res.Code != 1 {
+		t.Fatalf("expected success envelope code 1, got %d", res.Code)
+	}
+	data, ok := res.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected object data payload, got %#v", res.Data)
+	}
+	if _, ok := data["peerCount"]; !ok {
+		t.Fatalf("expected peerCount in response data, got %#v", data)
 	}
 }
 
@@ -46,21 +57,16 @@ func TestConfigReloadEndpoint(t *testing.T) {
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/config/reload", nil)
 	r.ServeHTTP(w, req)
-	// May return 200 or 500 depending on config state; assert not 404
-	if w.Code == 404 {
-		t.Errorf("expected non-404, got %d", w.Code)
-	}
-}
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	return false
+
+	var res respond.ApiResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("expected valid json response: %v", err)
+	}
+	if res.Code != 1 {
+		t.Fatalf("expected success envelope code 1, got %d", res.Code)
+	}
 }

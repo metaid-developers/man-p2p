@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"man-p2p/api/respond"
 	"man-p2p/common"
 	"man-p2p/man"
 	"man-p2p/pebblestore"
@@ -346,7 +347,15 @@ func content(ctx *gin.Context) {
 	var err error
 	p, err = man.PebbleStore.GetPinById(ctx.Param("number"))
 	if err != nil || p.Id == "" {
-		ctx.String(200, "fail")
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"code":    respond.ErrNoPinFound.Code,
+			"message": respond.ErrNoPinFound.Msg,
+		})
+		return
+	}
+	if p.ContentLength > 0 && len(p.ContentBody) == 0 {
+		ctx.Header("X-Man-Content-Status", "metadata-only")
+		ctx.Status(http.StatusOK)
 		return
 	}
 	if p.ContentType == "application/mp4" {

@@ -58,9 +58,18 @@ func checkStorage(dataDir string) {
 }
 
 func GetStatus() map[string]interface{} {
+	cfg := GetConfig()
 	peerCount := 0
+	peerID := ""
+	listenAddrs := []string{}
 	if Node != nil {
 		peerCount = len(Node.Network().Peers())
+		peerID = Node.ID().String()
+		addrs := Node.Addrs()
+		listenAddrs = make([]string, len(addrs))
+		for i, addr := range addrs {
+			listenAddrs[i] = addr.String()
+		}
 	}
 	return map[string]interface{}{
 		"peerCount":           peerCount,
@@ -68,6 +77,15 @@ func GetStatus() map[string]interface{} {
 		"dataSource":          "p2p",
 		"storageLimitReached": storageLimitReached.Load(),
 		"storageUsedBytes":    storageUsedBytes.Load(),
+		"syncMode":            cfg.SyncMode,
+		"runtimeMode": func() string {
+			if cfg.ChainSourceEnabled() {
+				return "chain-enabled"
+			}
+			return "p2p-only"
+		}(),
+		"peerId":     peerID,
+		"listenAddrs": listenAddrs,
 	}
 }
 

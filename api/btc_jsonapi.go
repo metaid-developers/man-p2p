@@ -146,7 +146,7 @@ func mempoolList(ctx *gin.Context) {
 func getPinById(ctx *gin.Context) {
 	pinMsg, err := man.PebbleStore.GetPinById(ctx.Param("numberOrId"))
 	if err != nil {
-		ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", pinMsg))
+		ctx.JSON(http.StatusNotFound, respond.ErrNoPinFound)
 		return
 	}
 	//pinMsg.ContentBody = []byte{}

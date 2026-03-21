@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"man-p2p/pin"
 
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -22,12 +23,8 @@ type PinRequest struct {
 }
 
 type PinResponse struct {
-	PinId     string `json:"pinId"`
-	Path      string `json:"path"`
-	Address   string `json:"address"`
-	Confirmed bool   `json:"confirmed"`
-	Content   []byte `json:"content"`
-	Error     string `json:"error,omitempty"`
+	Pin   *pin.PinInscription `json:"pin,omitempty"`
+	Error string              `json:"error,omitempty"`
 }
 
 var GetPinFn func(pinId string) (*PinResponse, error)
@@ -43,7 +40,7 @@ func RegisterSyncHandler() {
 		}
 		resp, err := GetPinFn(req.PinId)
 		if err != nil {
-			resp = &PinResponse{PinId: req.PinId, Error: err.Error()}
+			resp = &PinResponse{Error: err.Error()}
 		}
 		json.NewEncoder(s).Encode(resp)
 	})
@@ -67,6 +64,9 @@ func FetchPin(ctx context.Context, peerID peer.ID, pinId string) (*PinResponse, 
 	}
 	if resp.Error != "" {
 		return nil, fmt.Errorf("peer error: %s", resp.Error)
+	}
+	if resp.Pin == nil {
+		return nil, fmt.Errorf("peer returned empty pin payload")
 	}
 	return &resp, nil
 }

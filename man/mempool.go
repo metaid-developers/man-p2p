@@ -1,8 +1,10 @@
 package man
 
 import (
+	"context"
 	"log"
 	"man-p2p/common"
+	"man-p2p/p2p"
 	"man-p2p/pin"
 	"strings"
 	"time"
@@ -22,6 +24,17 @@ func handleMempoolPin(pinNode *pin.PinInscription) {
 	PebbleStore.Database.SetMempool(pinNode)
 	//增加PIN相关数据
 	PebbleStore.Database.SetAllPins(-1, []*pin.PinInscription{pinNode}, 20000)
+	_ = p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
+		PinId:         pinNode.Id,
+		Path:          pinNode.Path,
+		Address:       pinNode.Address,
+		MetaId:        pinNode.MetaId,
+		ChainName:     pinNode.ChainName,
+		Timestamp:     pinNode.Timestamp,
+		GenesisHeight: pinNode.GenesisHeight,
+		Confirmed:     false,
+		SizeBytes:     int64(pinNode.ContentLength),
+	})
 	//通知
 	handNotifcation(pinNode)
 

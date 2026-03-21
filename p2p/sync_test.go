@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"man-p2p/pin"
 	"testing"
 	"time"
 
@@ -24,8 +25,17 @@ func TestContentPull(t *testing.T) {
 
 	GetPinFn = func(pinId string) (*PinResponse, error) {
 		if pinId == "pin001" {
-			return &PinResponse{PinId: "pin001", Path: "/info/name",
-				Address: "1Addr", Confirmed: true, Content: []byte("Alice")}, nil
+			return &PinResponse{Pin: &pin.PinInscription{
+				Id:            "pin001",
+				Path:          "/info/name",
+				Address:       "1Addr",
+				MetaId:        "metaid-001",
+				ChainName:     "btc",
+				Timestamp:     1710000000,
+				GenesisHeight: 900000,
+				ContentBody:   []byte("Alice"),
+				ContentLength: 5,
+			}}, nil
 		}
 		return nil, fmt.Errorf("not found")
 	}
@@ -53,10 +63,21 @@ func TestContentPull(t *testing.T) {
 	json.NewEncoder(s).Encode(PinRequest{PinId: "pin001"})
 	s.CloseWrite()
 	var resp PinResponse
-	json.NewDecoder(s).Decode(&resp)
+	if err := json.NewDecoder(s).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
 
-	if string(resp.Content) != "Alice" {
-		t.Errorf("expected Alice, got %s", resp.Content)
+	if resp.Pin == nil {
+		t.Fatal("expected full pin payload")
+	}
+	if string(resp.Pin.ContentBody) != "Alice" {
+		t.Errorf("expected Alice, got %s", resp.Pin.ContentBody)
+	}
+	if resp.Pin.ChainName != "btc" {
+		t.Errorf("expected chain btc, got %s", resp.Pin.ChainName)
+	}
+	if resp.Pin.GenesisHeight != 900000 {
+		t.Errorf("expected height 900000, got %d", resp.Pin.GenesisHeight)
 	}
 }

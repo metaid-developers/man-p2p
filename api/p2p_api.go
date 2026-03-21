@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"man-p2p/api/respond"
 	"man-p2p/p2p"
 
@@ -15,10 +16,10 @@ func RegisterP2PRoutes(r *gin.Engine) {
 
 func configReload(ctx *gin.Context) {
 	if err := p2p.ReloadConfig(); err != nil {
-		ctx.JSON(500, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, respond.ApiError(500, err.Error()))
 		return
 	}
-	ctx.JSON(200, gin.H{"status": "reloaded"})
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"status": "reloaded"}))
 }
 
 func p2pStatus(ctx *gin.Context) {

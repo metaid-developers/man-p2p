@@ -53,6 +53,10 @@ func runMempoolTask(task func()) {
 
 // InitAdapter 初始化区块链适配器
 func InitAdapter(chainType, dbType, test, server string) {
+	InitRuntime(chainType, dbType, test, server, true)
+}
+
+func InitRuntime(chainType, dbType, test, server string, enableChain bool) {
 	PebbleStore = &PebbleData{}
 	PebbleStore.Init(common.Config.Pebble.Num)
 	common.Chain = chainType
@@ -77,6 +81,9 @@ func InitAdapter(chainType, dbType, test, server string) {
 	}
 	chainList := strings.Split(chainType, ",")
 	ChainList = chainList // 保存顺序
+	if !enableChain {
+		return
+	}
 	for _, chain := range chainList {
 		ChainParams[chain] = "mainnet"
 		if test == "1" {

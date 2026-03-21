@@ -50,6 +50,17 @@ func TestSelfMode(t *testing.T) {
 	OwnAddresses = nil // cleanup
 }
 
+func TestLoadOwnAddressesForSelfMode(t *testing.T) {
+	_ = LoadConfig(writeTempConfig(t, `{
+        "p2p_sync_mode": "self",
+        "p2p_own_addresses": ["1ConfigOwnAddr"]
+    }`))
+	ann := PinAnnouncement{PinId: "p-self-config", Address: "1ConfigOwnAddr", Path: "/info/name"}
+	if !ShouldSync(ann) {
+		t.Error("configured own address should sync in self mode")
+	}
+}
+
 func TestBlockedPath(t *testing.T) {
 	_ = LoadConfig(writeTempConfig(t, `{
         "p2p_sync_mode": "full",

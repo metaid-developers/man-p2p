@@ -18,7 +18,7 @@ func ShouldSync(ann PinAnnouncement) bool {
 	case "full":
 		return true
 	case "self":
-		return isOwnAddress(ann.Address)
+		return isOwnAddress(ann.Address, cfg)
 	case "selective":
 		return isInSelectiveList(ann, cfg)
 	default:
@@ -59,7 +59,12 @@ func isInSelectiveList(ann PinAnnouncement, cfg P2PSyncConfig) bool {
 
 var OwnAddresses []string
 
-func isOwnAddress(address string) bool {
+func isOwnAddress(address string, cfg P2PSyncConfig) bool {
+	for _, a := range cfg.OwnAddresses {
+		if a == address {
+			return true
+		}
+	}
 	for _, a := range OwnAddresses {
 		if a == address {
 			return true

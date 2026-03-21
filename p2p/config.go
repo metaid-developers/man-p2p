@@ -16,6 +16,8 @@ type P2PSyncConfig struct {
 	BootstrapNodes     []string `json:"p2p_bootstrap_nodes"`
 	EnableRelay        bool     `json:"p2p_enable_relay"`
 	StorageLimitGB     float64  `json:"p2p_storage_limit_gb"`
+	OwnAddresses       []string `json:"p2p_own_addresses"`
+	EnableChainSource  *bool    `json:"p2p_enable_chain_source"`
 }
 
 var (
@@ -51,4 +53,11 @@ func GetConfig() P2PSyncConfig {
 	configMu.RLock()
 	defer configMu.RUnlock()
 	return currentConfig
+}
+
+func (cfg P2PSyncConfig) ChainSourceEnabled() bool {
+	if cfg.EnableChainSource == nil {
+		return true
+	}
+	return *cfg.EnableChainSource
 }

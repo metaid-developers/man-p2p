@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -14,6 +15,10 @@ type PinAnnouncement struct {
 	PinId     string `json:"pinId"`
 	Path      string `json:"path"`
 	Address   string `json:"address"`
+	MetaId    string `json:"metaId"`
+	ChainName string `json:"chainName"`
+	Timestamp int64  `json:"timestamp"`
+	GenesisHeight int64 `json:"genesisHeight"`
 	Confirmed bool   `json:"confirmed"`
 	SizeBytes int64  `json:"sizeBytes"`
 	PeerID    string `json:"peerId"`
@@ -44,6 +49,9 @@ func InitGossip(ctx context.Context) error {
 }
 
 func PublishPin(ctx context.Context, ann PinAnnouncement) error {
+	if Node == nil || topic == nil {
+		return fmt.Errorf("p2p gossip not initialized")
+	}
 	ann.PeerID = Node.ID().String()
 	data, err := json.Marshal(ann)
 	if err != nil {

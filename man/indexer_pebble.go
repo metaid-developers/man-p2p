@@ -73,6 +73,10 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 				PinId:     pinNode.Id,
 				Path:      pinNode.Path,
 				Address:   pinNode.Address,
+				MetaId:    pinNode.MetaId,
+				ChainName: pinNode.ChainName,
+				Timestamp: pinNode.Timestamp,
+				GenesisHeight: pinNode.GenesisHeight,
 				Confirmed: pinNode.GenesisHeight > 0,
 				SizeBytes: int64(pinNode.ContentLength),
 			})
