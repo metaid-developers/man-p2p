@@ -135,3 +135,29 @@ func TestRemoteProcessPatternExpandsTildeToMatchableSuffix(t *testing.T) {
 		t.Fatalf("expected remote process pattern %q, got %q", want, got)
 	}
 }
+
+func TestManBinaryPatternTargetsBundledChildBinary(t *testing.T) {
+	got := manBinaryPattern("/Applications/IDBots.app")
+	want := "/Applications/IDBots.app/Contents/Resources/man-p2p-darwin-arm64"
+	if got != want {
+		t.Fatalf("expected man binary pattern %q, got %q", want, got)
+	}
+}
+
+func TestCleanupTargetPIDsIncludesNewAppAndChildProcesses(t *testing.T) {
+	got := cleanupTargetPIDs(
+		[]int{10},
+		[]int{10, 20},
+		[]int{30},
+		[]int{30, 40, 50},
+	)
+	want := []int{20, 40, 50}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}

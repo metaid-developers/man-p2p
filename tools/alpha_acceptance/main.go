@@ -77,7 +77,9 @@ type localRuntime struct {
 	RPCBaseURL    string
 	ConfigPath    string
 	BinaryPattern string
+	ManBinaryPath string
 	BeforePIDs    []int
+	BeforeManPIDs []int
 }
 
 type remoteRuntime struct {
@@ -88,6 +90,7 @@ type remoteRuntime struct {
 	BinaryPattern      string
 	ManBinaryPattern   string
 	BeforePIDs         []int
+	BeforeManPIDs      []int
 	ExistingRuntime    bool
 	OriginalConfig     []byte
 	OriginalConfigRead bool
@@ -391,6 +394,11 @@ func startLocalRuntime(ctx context.Context, opts runOptions) (*localRuntime, err
 	if err != nil {
 		return nil, fmt.Errorf("list local app pids: %w", err)
 	}
+	manBinaryPath := manBinaryPattern(opts.LocalApp)
+	beforeManPIDs, err := listLocalPIDs(manBinaryPath)
+	if err != nil {
+		return nil, fmt.Errorf("list local man-p2p pids: %w", err)
+	}
 
 	envPairs := [][2]string{
 		{"IDBOTS_APP_DATA_PATH", appData},
@@ -424,7 +432,9 @@ func startLocalRuntime(ctx context.Context, opts runOptions) (*localRuntime, err
 		RPCBaseURL:    fmt.Sprintf("http://127.0.0.1:%d", rpcPort),
 		ConfigPath:    filepath.Join(userData, "man-p2p-config.json"),
 		BinaryPattern: binaryPattern,
+		ManBinaryPath: manBinaryPath,
 		BeforePIDs:    beforePIDs,
+		BeforeManPIDs: beforeManPIDs,
 	}, nil
 }
 
@@ -435,7 +445,7 @@ func prepareRemoteRuntime(ctx context.Context, opts runOptions) (*remoteRuntime,
 		BaseURL:          opts.RemoteBaseURL,
 		ConfigPath:       "~/Library/Application Support/IDBots/man-p2p-config.json",
 		BinaryPattern:    appBinaryPattern(opts.RemoteApp),
-		ManBinaryPattern: pathpkg.Join(opts.RemoteApp, "Contents", "Resources", "man-p2p-darwin-arm64"),
+		ManBinaryPattern: manBinaryPattern(opts.RemoteApp),
 	}
 
 	beforePIDs, err := listRemotePIDs(ctx, runtime, opts, runtime.BinaryPattern)
@@ -443,6 +453,11 @@ func prepareRemoteRuntime(ctx context.Context, opts runOptions) (*remoteRuntime,
 		return nil, fmt.Errorf("list remote app pids: %w", err)
 	}
 	runtime.BeforePIDs = beforePIDs
+	beforeManPIDs, err := listRemotePIDs(ctx, runtime, opts, runtime.ManBinaryPattern)
+	if err != nil {
+		return nil, fmt.Errorf("list remote man-p2p pids: %w", err)
+	}
+	runtime.BeforeManPIDs = beforeManPIDs
 	if opts.RemoteCopy {
 		if err := copyRemoteApp(ctx, runtime, opts); err != nil {
 			return nil, err
@@ -749,9 +764,10 @@ func cleanupLocalRuntime(ctx context.Context, local *localRuntime, opts runOptio
 	if !opts.Cleanup {
 		return
 	}
-	after, err := listLocalPIDs(local.BinaryPattern)
-	if err == nil {
-		killPIDs(ctx, diffPIDs(local.BeforePIDs, after))
+	afterApp, appErr := listLocalPIDs(local.BinaryPattern)
+	afterMan, manErr := listLocalPIDs(local.ManBinaryPath)
+	if appErr == nil && manErr == nil {
+		killPIDs(ctx, cleanupTargetPIDs(local.BeforePIDs, afterApp, local.BeforeManPIDs, afterMan))
 	}
 	_ = os.RemoveAll(local.Root)
 }
@@ -765,9 +781,10 @@ func cleanupRemoteRuntime(ctx context.Context, runtime *remoteRuntime, opts runO
 	if runtime.ExistingRuntime {
 		return
 	}
-	after, err := listRemotePIDs(ctx, runtime, opts, runtime.BinaryPattern)
-	if err == nil {
-		killRemotePIDs(ctx, runtime, opts, diffPIDs(runtime.BeforePIDs, after))
+	afterApp, appErr := listRemotePIDs(ctx, runtime, opts, runtime.BinaryPattern)
+	afterMan, manErr := listRemotePIDs(ctx, runtime, opts, runtime.ManBinaryPattern)
+	if appErr == nil && manErr == nil {
+		_ = killRemotePIDs(ctx, runtime, opts, cleanupTargetPIDs(runtime.BeforePIDs, afterApp, runtime.BeforeManPIDs, afterMan))
 	}
 }
 
@@ -942,6 +959,10 @@ func appBinaryPattern(appPath string) string {
 	return pathpkg.Join(appPath, "Contents", "MacOS", base)
 }
 
+func manBinaryPattern(appPath string) string {
+	return pathpkg.Join(appPath, "Contents", "Resources", "man-p2p-darwin-arm64")
+}
+
 func listLocalPIDs(pattern string) ([]int, error) {
 	out, err := exec.Command("pgrep", "-f", pattern).CombinedOutput()
 	if err != nil {
@@ -1009,6 +1030,22 @@ func diffPIDs(before, after []int) []int {
 		}
 	}
 	return diff
+}
+
+func cleanupTargetPIDs(beforeApp, afterApp, beforeMan, afterMan []int) []int {
+	combined := append(diffPIDs(beforeApp, afterApp), diffPIDs(beforeMan, afterMan)...)
+	if len(combined) == 0 {
+		return nil
+	}
+	sort.Ints(combined)
+	targets := make([]int, 0, len(combined))
+	for _, pid := range combined {
+		if len(targets) > 0 && targets[len(targets)-1] == pid {
+			continue
+		}
+		targets = append(targets, pid)
+	}
+	return targets
 }
 
 func containsString(list []string, want string) bool {
