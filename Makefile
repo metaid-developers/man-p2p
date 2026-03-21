@@ -31,7 +31,7 @@ test:
 	CGO_ENABLED=0 go test ./p2p/... -v -count=1 -timeout 60s
 
 alpha-test:
-	CGO_ENABLED=0 go test ./p2p -run 'TestAlphaDualInstanceRealtimeSync|TestLoadConfig|TestReloadConfig|TestChainSourceDefaultsToEnabled|TestLoadConfigCanDisableChainSource|TestPublishPinWithoutInitializedHost|TestInitHost|TestStorageLimitEnforcement|TestBlocklistOverridesAllowlist|TestSelectivePathMatch|TestOversizedPinStillPassesFilter|TestSelfMode|TestLoadOwnAddressesForSelfMode|TestBlockedPath|TestContentPull' -v -count=1 -timeout 60s
+	CGO_ENABLED=0 go test ./p2p -run 'TestAlphaDualInstanceRealtimeSync|TestAlphaDualProcessRealtimeSync|TestLoadConfig|TestReloadConfig|TestChainSourceDefaultsToEnabled|TestLoadConfigCanDisableChainSource|TestPublishPinWithoutInitializedHost|TestInitHost|TestStorageLimitEnforcement|TestBlocklistOverridesAllowlist|TestSelectivePathMatch|TestOversizedPinStillPassesFilter|TestSelfMode|TestLoadOwnAddressesForSelfMode|TestSelfModeRequiresConfiguredOwnAddress|TestSelfModeBlockOverridesOwnAddress|TestBlockedPath|TestContentPull' -v -count=1 -timeout 60s
 	CGO_ENABLED=0 go test ./api -run 'TestP2PStatusEndpoint|TestP2PPeersEndpoint|TestConfigReloadEndpoint|TestAlphaPinMissReturnsNon2xx|TestAlphaContentMissReturnsNon2xx|TestAlphaMetadataOnlyContentContract|TestAlphaP2PStatusFields|TestAlphaConfigReloadUpdatesRuntimeFilterState' -v -count=1 -timeout 60s
 	CGO_ENABLED=0 go test ./man -run 'TestChatPubKeyParsed|TestIngestP2PPinStoresPinAndMetaIdInfo|TestInitRuntimeWithoutChainSourceSkipsAdapters' -v -count=1 -timeout 60s
 

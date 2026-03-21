@@ -37,8 +37,10 @@ func TestOversizedPinStillPassesFilter(t *testing.T) {
 }
 
 func TestSelfMode(t *testing.T) {
-	_ = LoadConfig(writeTempConfig(t, `{"p2p_sync_mode": "self"}`))
-	OwnAddresses = []string{"1MyAddr"}
+	_ = LoadConfig(writeTempConfig(t, `{
+        "p2p_sync_mode": "self",
+        "p2p_own_addresses": ["1MyAddr"]
+    }`))
 	ann := PinAnnouncement{PinId: "p4", Address: "1MyAddr", Path: "/info/name"}
 	if !ShouldSync(ann) {
 		t.Error("own address should sync in self mode")
@@ -47,7 +49,6 @@ func TestSelfMode(t *testing.T) {
 	if ShouldSync(ann2) {
 		t.Error("other address should not sync in self mode")
 	}
-	OwnAddresses = nil // cleanup
 }
 
 func TestLoadOwnAddressesForSelfMode(t *testing.T) {
@@ -58,6 +59,33 @@ func TestLoadOwnAddressesForSelfMode(t *testing.T) {
 	ann := PinAnnouncement{PinId: "p-self-config", Address: "1ConfigOwnAddr", Path: "/info/name"}
 	if !ShouldSync(ann) {
 		t.Error("configured own address should sync in self mode")
+	}
+}
+
+func TestSelfModeRequiresConfiguredOwnAddress(t *testing.T) {
+	OwnAddresses = []string{"1LegacyOwnAddr"}
+	t.Cleanup(func() {
+		OwnAddresses = nil
+	})
+
+	_ = LoadConfig(writeTempConfig(t, `{
+        "p2p_sync_mode": "self"
+    }`))
+	ann := PinAnnouncement{PinId: "p-self-legacy", Address: "1LegacyOwnAddr", Path: "/info/name"}
+	if ShouldSync(ann) {
+		t.Error("self mode should not rely on legacy global own addresses")
+	}
+}
+
+func TestSelfModeBlockOverridesOwnAddress(t *testing.T) {
+	_ = LoadConfig(writeTempConfig(t, `{
+        "p2p_sync_mode": "self",
+        "p2p_own_addresses": ["1BlockedOwnAddr"],
+        "p2p_block_addresses": ["1BlockedOwnAddr"]
+    }`))
+	ann := PinAnnouncement{PinId: "p-self-blocked", Address: "1BlockedOwnAddr", Path: "/info/name"}
+	if ShouldSync(ann) {
+		t.Error("blocked own address should not sync in self mode")
 	}
 }
 

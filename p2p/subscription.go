@@ -57,15 +57,12 @@ func isInSelectiveList(ann PinAnnouncement, cfg P2PSyncConfig) bool {
 	return false
 }
 
+// OwnAddresses is a deprecated legacy hook kept only for compatibility.
+// Runtime sync decisions must use cfg.OwnAddresses from the loaded config.
 var OwnAddresses []string
 
 func isOwnAddress(address string, cfg P2PSyncConfig) bool {
 	for _, a := range cfg.OwnAddresses {
-		if a == address {
-			return true
-		}
-	}
-	for _, a := range OwnAddresses {
 		if a == address {
 			return true
 		}
