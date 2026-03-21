@@ -1,0 +1,137 @@
+package main
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestPickBootstrapAddrPrefersRequestedIPv4(t *testing.T) {
+	status := p2pStatusEnvelope{
+		Data: p2pStatusData{
+			PeerID: "12D3KooWLocalPeer",
+			ListenAddrs: []string{
+				"/ip4/127.0.0.1/tcp/4001",
+				"/ip4/10.0.0.5/tcp/4001",
+				"/ip4/192.168.3.30/tcp/4001",
+			},
+		},
+	}
+
+	got, err := pickBootstrapAddr(status, "192.168.3.30")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "/ip4/192.168.3.30/tcp/4001/p2p/12D3KooWLocalPeer"
+	if got != want {
+		t.Fatalf("expected %s, got %s", want, got)
+	}
+}
+
+func TestMergeP2PConfigAppliesAcceptanceOverrides(t *testing.T) {
+	raw := []byte(`{
+		"p2p_sync_mode": "self",
+		"p2p_bootstrap_nodes": [],
+		"p2p_selective_addresses": ["1Selective"],
+		"p2p_selective_paths": ["/info/*"],
+		"p2p_block_addresses": ["1Blocked"],
+		"p2p_block_paths": ["/blocked/*"],
+		"p2p_max_content_size_kb": 512,
+		"p2p_enable_relay": true,
+		"p2p_storage_limit_gb": 10,
+		"p2p_enable_chain_source": false,
+		"p2p_own_addresses": ["1ExistingAddr"],
+		"custom_field": "keep-me"
+	}`)
+
+	updated, err := mergeP2PConfig(raw, acceptanceConfigPatch{
+		SyncMode:           "full",
+		BootstrapNodes:     []string{"/ip4/192.168.3.30/tcp/4001/p2p/12D3KooWLocalPeer"},
+		OwnAddresses:       []string{},
+		SelectiveAddresses: []string{},
+		SelectivePaths:     []string{},
+		BlockAddresses:     []string{},
+		BlockPaths:         []string{},
+		MaxContentSizeKB:   intPtr(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(updated, &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if got["p2p_sync_mode"] != "full" {
+		t.Fatalf("expected sync mode full, got %#v", got["p2p_sync_mode"])
+	}
+	bootstrap, ok := got["p2p_bootstrap_nodes"].([]any)
+	if !ok || len(bootstrap) != 1 || bootstrap[0] != "/ip4/192.168.3.30/tcp/4001/p2p/12D3KooWLocalPeer" {
+		t.Fatalf("unexpected bootstrap nodes: %#v", got["p2p_bootstrap_nodes"])
+	}
+	ownAddresses, ok := got["p2p_own_addresses"].([]any)
+	if !ok || len(ownAddresses) != 0 {
+		t.Fatalf("expected own addresses to be cleared, got %#v", got["p2p_own_addresses"])
+	}
+	if selectiveAddresses, ok := got["p2p_selective_addresses"].([]any); !ok || len(selectiveAddresses) != 0 {
+		t.Fatalf("expected selective addresses cleared, got %#v", got["p2p_selective_addresses"])
+	}
+	if selectivePaths, ok := got["p2p_selective_paths"].([]any); !ok || len(selectivePaths) != 0 {
+		t.Fatalf("expected selective paths cleared, got %#v", got["p2p_selective_paths"])
+	}
+	if blockAddresses, ok := got["p2p_block_addresses"].([]any); !ok || len(blockAddresses) != 0 {
+		t.Fatalf("expected block addresses cleared, got %#v", got["p2p_block_addresses"])
+	}
+	if blockPaths, ok := got["p2p_block_paths"].([]any); !ok || len(blockPaths) != 0 {
+		t.Fatalf("expected block paths cleared, got %#v", got["p2p_block_paths"])
+	}
+	if got["p2p_max_content_size_kb"] != float64(0) {
+		t.Fatalf("expected max content size reset to 0, got %#v", got["p2p_max_content_size_kb"])
+	}
+	if got["custom_field"] != "keep-me" {
+		t.Fatalf("expected custom field preserved, got %#v", got["custom_field"])
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func TestSSHOptionsDisablePubkeyWhenPasswordProvided(t *testing.T) {
+	args := sshOptions("secret")
+	joined := strings.Join(args, " ")
+
+	for _, want := range []string{
+		"StrictHostKeyChecking=no",
+		"PreferredAuthentications=password",
+		"PubkeyAuthentication=no",
+		"IdentitiesOnly=yes",
+		"NumberOfPasswordPrompts=1",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected ssh options to contain %q, got %q", want, joined)
+		}
+	}
+}
+
+func TestSSHOptionsLeaveDefaultAuthWhenPasswordEmpty(t *testing.T) {
+	args := sshOptions("")
+	joined := strings.Join(args, " ")
+
+	if strings.Contains(joined, "PreferredAuthentications=password") {
+		t.Fatalf("did not expect password-only auth when no password is configured: %q", joined)
+	}
+	if strings.Contains(joined, "PubkeyAuthentication=no") {
+		t.Fatalf("did not expect pubkey auth to be disabled when no password is configured: %q", joined)
+	}
+}
+
+func TestRemoteProcessPatternExpandsTildeToMatchableSuffix(t *testing.T) {
+	got := remoteProcessPattern("~/tmp/idbots-alpha/IDBots.app/Contents/Resources/man-p2p-darwin-arm64")
+	want := "/tmp/idbots-alpha/IDBots.app/Contents/Resources/man-p2p-darwin-arm64"
+	if got != want {
+		t.Fatalf("expected remote process pattern %q, got %q", want, got)
+	}
+}
