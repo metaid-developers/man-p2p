@@ -1,8 +1,13 @@
 package p2p
 
 import (
+	"context"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func writeTempConfig(t *testing.T, jsonStr string) string {
@@ -61,6 +66,58 @@ func TestReloadConfig(t *testing.T) {
 	if got := GetConfig(); got.SyncMode != "full" {
 		t.Errorf("expected full after reload, got %s", got.SyncMode)
 	}
+}
+
+func TestReloadConfigConnectsNewBootstrapNode(t *testing.T) {
+	path := writeTempConfig(t, `{"p2p_sync_mode":"full","p2p_bootstrap_nodes":[]}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := InitHost(ctx, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	defer CloseHost()
+
+	peerB, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer peerB.Close()
+
+	if got := len(Node.Network().Peers()); got != 0 {
+		t.Fatalf("expected no peers before reload, got %d", got)
+	}
+
+	bootstrapAddr, err := peer.AddrInfoToP2pAddrs(&peer.AddrInfo{ID: peerB.ID(), Addrs: peerB.Addrs()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bootstrapAddr) == 0 {
+		t.Fatal("expected bootstrap multiaddr")
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_sync_mode":"full","p2p_bootstrap_nodes":["`+bootstrapAddr[0].String()+`"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, connected := range Node.Network().Peers() {
+			if connected == peerB.ID() {
+				return
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatalf("expected reload to connect bootstrap peer %s, peers=%v", peerB.ID(), Node.Network().Peers())
 }
 
 func TestChainSourceDefaultsToEnabled(t *testing.T) {
