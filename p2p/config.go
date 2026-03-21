@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"sync"
@@ -46,6 +47,9 @@ func ReloadConfig() error {
 	configMu.Lock()
 	currentConfig = cfg
 	configMu.Unlock()
+	if Node != nil {
+		go connectBootstrapNodes(context.Background())
+	}
 	return nil
 }
 
