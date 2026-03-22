@@ -1,3 +1,2 @@
-// Package tools contains utility tools for the indexer.
-// The actual tool implementations are in the cmd subdirectory.
-package tools
+// Package main contains standalone maintenance and debugging tools for man-p2p.
+package main
