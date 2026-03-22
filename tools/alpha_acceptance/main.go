@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	pathpkg "path"
@@ -24,9 +25,11 @@ import (
 )
 
 const (
-	defaultRemoteAppPath = "~/tmp/idbots-alpha/IDBots.app"
-	defaultRemoteBaseURL = "http://127.0.0.1:7281"
-	defaultFallbackPinID = "d7947500f7668e361bd84d20a45f49bb8e692d3c5ec1dc57310a8d8171f258f8i0"
+	defaultRemoteAppPath    = "~/tmp/idbots-alpha/IDBots.app"
+	defaultRemoteBaseURL    = "http://127.0.0.1:7281"
+	defaultRemoteConfigPath = "~/Library/Application Support/IDBots/man-p2p-config.json"
+	defaultFallbackPinID    = "d7947500f7668e361bd84d20a45f49bb8e692d3c5ec1dc57310a8d8171f258f8i0"
+	defaultRemoteLaunchMode = "binary"
 )
 
 type p2pStatusEnvelope struct {
@@ -62,6 +65,7 @@ type runOptions struct {
 	RemoteHost         string
 	RemoteApp          string
 	RemoteBaseURL      string
+	RemoteLaunchMode   string
 	RemoteCopy         bool
 	PreferredLocalIPv4 string
 	RemotePassword     string
@@ -85,8 +89,14 @@ type localRuntime struct {
 type remoteRuntime struct {
 	Target             string
 	AppPath            string
+	AppBinaryPath      string
 	BaseURL            string
 	ConfigPath         string
+	RuntimeRoot        string
+	AppDataPath        string
+	UserDataPath       string
+	LogPath            string
+	MetaIDRPCPort      int
 	BinaryPattern      string
 	ManBinaryPattern   string
 	BeforePIDs         []int
@@ -235,6 +245,7 @@ func parseRunOptions(args []string) (runOptions, error) {
 	fs.StringVar(&opts.RemoteHost, "remote-host", "", "Remote SSH host")
 	fs.StringVar(&opts.RemoteApp, "remote-app", defaultRemoteAppPath, "Remote packaged IDBots.app path")
 	fs.StringVar(&opts.RemoteBaseURL, "remote-base-url", defaultRemoteBaseURL, "Remote man-p2p base URL")
+	fs.StringVar(&opts.RemoteLaunchMode, "remote-launch-mode", defaultRemoteLaunchMode, "How to start the remote packaged app: binary or open")
 	fs.BoolVar(&opts.RemoteCopy, "remote-copy", false, "Copy local packaged app to the remote path before validation")
 	fs.StringVar(&opts.PreferredLocalIPv4, "preferred-local-ip", "", "Preferred local LAN IPv4 to expose in the bootstrap multiaddr")
 	fs.StringVar(&remotePasswordEnv, "remote-password-env", remotePasswordEnv, "Environment variable containing the remote SSH password; empty means plain ssh/scp")
@@ -250,6 +261,11 @@ func parseRunOptions(args []string) (runOptions, error) {
 	}
 	if opts.RemoteUser == "" || opts.RemoteHost == "" {
 		return opts, errors.New("--remote-user and --remote-host are required")
+	}
+	switch opts.RemoteLaunchMode {
+	case "binary", "open":
+	default:
+		return opts, fmt.Errorf("--remote-launch-mode must be binary or open, got %q", opts.RemoteLaunchMode)
 	}
 	if opts.ConnectTimeout <= 0 {
 		return opts, errors.New("--connect-timeout must be > 0")
@@ -404,6 +420,7 @@ func startLocalRuntime(ctx context.Context, opts runOptions) (*localRuntime, err
 		{"IDBOTS_APP_DATA_PATH", appData},
 		{"IDBOTS_MAN_P2P_LOCAL_BASE", fmt.Sprintf("http://127.0.0.1:%d", p2pPort)},
 		{"IDBOTS_METAID_RPC_PORT", strconv.Itoa(rpcPort)},
+		{"IDBOTS_DISABLE_SINGLE_INSTANCE_LOCK", "1"},
 	}
 	for _, pair := range envPairs {
 		if _, err := runLocalCommand(ctx, "launchctl", "setenv", pair[0], pair[1]); err != nil {
@@ -442,10 +459,14 @@ func prepareRemoteRuntime(ctx context.Context, opts runOptions) (*remoteRuntime,
 	runtime := &remoteRuntime{
 		Target:           fmt.Sprintf("%s@%s", opts.RemoteUser, opts.RemoteHost),
 		AppPath:          opts.RemoteApp,
+		AppBinaryPath:    appBinaryPattern(opts.RemoteApp),
 		BaseURL:          opts.RemoteBaseURL,
-		ConfigPath:       "~/Library/Application Support/IDBots/man-p2p-config.json",
+		ConfigPath:       defaultRemoteConfigPath,
 		BinaryPattern:    appBinaryPattern(opts.RemoteApp),
 		ManBinaryPattern: manBinaryPattern(opts.RemoteApp),
+	}
+	if err := configureRemoteRuntime(runtime, opts); err != nil {
+		return nil, err
 	}
 
 	beforePIDs, err := listRemotePIDs(ctx, runtime, opts, runtime.BinaryPattern)
@@ -479,17 +500,31 @@ func prepareRemoteRuntime(ctx context.Context, opts runOptions) (*remoteRuntime,
 func ensureRemoteRuntime(ctx context.Context, runtime *remoteRuntime, opts runOptions) error {
 	if err := waitForRemoteHealth(ctx, runtime, opts, 2*time.Second); err == nil {
 		runtime.ExistingRuntime = true
+		adoptExistingRemoteRuntime(runtime)
 		logf("remote runtime already healthy; reusing existing 7281 service")
 		return nil
 	}
 
-	if _, err := runRemoteCommand(ctx, runtime, opts, fmt.Sprintf("open -n %s", remotePathExpr(runtime.AppPath))); err != nil {
+	startCmd, err := buildRemoteStartCommand(runtime, opts)
+	if err != nil {
+		return err
+	}
+	if _, err := runRemoteCommand(ctx, runtime, opts, startCmd); err != nil {
 		return fmt.Errorf("start remote app: %w", err)
 	}
 	if err := waitForRemoteHealth(ctx, runtime, opts, opts.ConnectTimeout); err != nil {
 		return fmt.Errorf("wait remote health: %w", err)
 	}
 	return nil
+}
+
+func adoptExistingRemoteRuntime(runtime *remoteRuntime) {
+	runtime.ConfigPath = defaultRemoteConfigPath
+	runtime.RuntimeRoot = ""
+	runtime.AppDataPath = ""
+	runtime.UserDataPath = ""
+	runtime.LogPath = ""
+	runtime.MetaIDRPCPort = 0
 }
 
 func patchRemoteConfig(ctx context.Context, runtime *remoteRuntime, opts runOptions, patch acceptanceConfigPatch) error {
@@ -786,6 +821,9 @@ func cleanupRemoteRuntime(ctx context.Context, runtime *remoteRuntime, opts runO
 	if appErr == nil && manErr == nil {
 		_ = killRemotePIDs(ctx, runtime, opts, cleanupTargetPIDs(runtime.BeforePIDs, afterApp, runtime.BeforeManPIDs, afterMan))
 	}
+	if opts.RemoteLaunchMode == "binary" && runtime.RuntimeRoot != "" {
+		_, _ = runRemoteCommand(ctx, runtime, opts, fmt.Sprintf("rm -rf %s", shellQuote(runtime.RuntimeRoot)))
+	}
 }
 
 func copyRemoteApp(ctx context.Context, runtime *remoteRuntime, opts runOptions) error {
@@ -832,7 +870,11 @@ func restartRemoteApp(ctx context.Context, runtime *remoteRuntime, opts runOptio
 	if err := killRemotePIDs(ctx, runtime, opts, appPIDs); err != nil {
 		return err
 	}
-	if _, err := runRemoteCommand(ctx, runtime, opts, fmt.Sprintf("open -n %s", remotePathExpr(runtime.AppPath))); err != nil {
+	startCmd, err := buildRemoteStartCommand(runtime, opts)
+	if err != nil {
+		return err
+	}
+	if _, err := runRemoteCommand(ctx, runtime, opts, startCmd); err != nil {
 		return err
 	}
 	return waitForRemoteHealth(ctx, runtime, opts, opts.ConnectTimeout)
@@ -952,6 +994,67 @@ func reservePort() (int, error) {
 		return 0, errors.New("listener did not return tcp addr")
 	}
 	return addr.Port, nil
+}
+
+func configureRemoteRuntime(runtime *remoteRuntime, opts runOptions) error {
+	if opts.RemoteLaunchMode != "binary" {
+		return nil
+	}
+	parsed, err := neturl.Parse(opts.RemoteBaseURL)
+	if err != nil {
+		return fmt.Errorf("parse remote base url: %w", err)
+	}
+	port := parsed.Port()
+	if port == "" {
+		return fmt.Errorf("remote base url %q must include an explicit port for binary launch mode", opts.RemoteBaseURL)
+	}
+	p2pPort, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("parse remote base url port %q: %w", port, err)
+	}
+	metaidRPCPort := p2pPort + 1
+	if metaidRPCPort > 65535 {
+		metaidRPCPort = 31201
+	}
+
+	runtime.RuntimeRoot = fmt.Sprintf("/tmp/idbots-alpha-remote-%d", p2pPort)
+	runtime.AppDataPath = pathpkg.Join(runtime.RuntimeRoot, "appData")
+	runtime.UserDataPath = pathpkg.Join(runtime.RuntimeRoot, "userData")
+	runtime.ConfigPath = pathpkg.Join(runtime.UserDataPath, "man-p2p-config.json")
+	runtime.LogPath = pathpkg.Join(runtime.RuntimeRoot, "remote-app.log")
+	runtime.MetaIDRPCPort = metaidRPCPort
+	return nil
+}
+
+func buildRemoteStartCommand(runtime *remoteRuntime, opts runOptions) (string, error) {
+	if opts.RemoteLaunchMode == "open" {
+		return fmt.Sprintf("open -n %s", remotePathExpr(runtime.AppPath)), nil
+	}
+	if opts.RemoteLaunchMode != "binary" {
+		return "", fmt.Errorf("unsupported remote launch mode %q", opts.RemoteLaunchMode)
+	}
+	if runtime.RuntimeRoot == "" || runtime.AppDataPath == "" || runtime.UserDataPath == "" || runtime.LogPath == "" || runtime.MetaIDRPCPort == 0 {
+		return "", errors.New("binary remote runtime paths are not configured")
+	}
+
+	envPairs := []string{
+		fmt.Sprintf("IDBOTS_APP_DATA_PATH=%s", shellQuote(runtime.AppDataPath)),
+		fmt.Sprintf("IDBOTS_USER_DATA_PATH=%s", shellQuote(runtime.UserDataPath)),
+		fmt.Sprintf("IDBOTS_MAN_P2P_LOCAL_BASE=%s", shellQuote(runtime.BaseURL)),
+		"IDBOTS_DISABLE_SINGLE_INSTANCE_LOCK=1",
+		fmt.Sprintf("IDBOTS_METAID_RPC_PORT=%s", shellQuote(strconv.Itoa(runtime.MetaIDRPCPort))),
+		"ELECTRON_ENABLE_LOGGING=1",
+	}
+
+	return fmt.Sprintf(
+		"mkdir -p %s %s && rm -f %s && nohup env %s %s > %s 2>&1 < /dev/null &",
+		shellQuote(runtime.AppDataPath),
+		shellQuote(runtime.UserDataPath),
+		shellQuote(runtime.LogPath),
+		strings.Join(envPairs, " "),
+		remotePathExpr(runtime.AppBinaryPath),
+		shellQuote(runtime.LogPath),
+	), nil
 }
 
 func appBinaryPattern(appPath string) string {
