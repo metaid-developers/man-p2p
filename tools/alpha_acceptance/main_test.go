@@ -161,3 +161,115 @@ func TestCleanupTargetPIDsIncludesNewAppAndChildProcesses(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRunOptionsAcceptsRemoteLaunchModeFlag(t *testing.T) {
+	opts, err := parseRunOptions([]string{
+		"--local-app", "/tmp/IDBots.app",
+		"--remote-user", "showpay",
+		"--remote-host", "192.168.3.52",
+		"--remote-launch-mode", "binary",
+	})
+	if err != nil {
+		t.Fatalf("expected remote launch mode flag to be accepted, got error: %v", err)
+	}
+	if opts.RemoteLaunchMode != "binary" {
+		t.Fatalf("expected remote launch mode binary, got %q", opts.RemoteLaunchMode)
+	}
+}
+
+func TestConfigureRemoteRuntimeBinaryModeUsesIsolatedPaths(t *testing.T) {
+	runtime := &remoteRuntime{
+		AppPath:       "~/tmp/idbots-alpha/IDBots.app",
+		AppBinaryPath: appBinaryPattern("~/tmp/idbots-alpha/IDBots.app"),
+		BaseURL:       "http://127.0.0.1:62196",
+		ConfigPath:    "~/Library/Application Support/IDBots/man-p2p-config.json",
+	}
+	opts := runOptions{
+		RemoteApp:        runtime.AppPath,
+		RemoteBaseURL:    runtime.BaseURL,
+		RemoteLaunchMode: "binary",
+	}
+
+	if err := configureRemoteRuntime(runtime, opts); err != nil {
+		t.Fatal(err)
+	}
+
+	if runtime.RuntimeRoot != "/tmp/idbots-alpha-remote-62196" {
+		t.Fatalf("expected isolated runtime root, got %q", runtime.RuntimeRoot)
+	}
+	if runtime.ConfigPath != "/tmp/idbots-alpha-remote-62196/userData/man-p2p-config.json" {
+		t.Fatalf("unexpected config path %q", runtime.ConfigPath)
+	}
+	if runtime.MetaIDRPCPort != 62197 {
+		t.Fatalf("expected derived MetaID RPC port 62197, got %d", runtime.MetaIDRPCPort)
+	}
+}
+
+func TestAdoptExistingRemoteRuntimeRestoresDefaultConfigPath(t *testing.T) {
+	runtime := &remoteRuntime{
+		AppPath:       "~/tmp/idbots-alpha/IDBots.app",
+		AppBinaryPath: appBinaryPattern("~/tmp/idbots-alpha/IDBots.app"),
+		BaseURL:       "http://127.0.0.1:7281",
+		ConfigPath:    defaultRemoteConfigPath,
+	}
+	opts := runOptions{
+		RemoteApp:        runtime.AppPath,
+		RemoteBaseURL:    runtime.BaseURL,
+		RemoteLaunchMode: "binary",
+	}
+
+	if err := configureRemoteRuntime(runtime, opts); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.ConfigPath == defaultRemoteConfigPath {
+		t.Fatalf("expected binary runtime config path to move away from default before adopting existing runtime")
+	}
+
+	adoptExistingRemoteRuntime(runtime)
+
+	if runtime.ConfigPath != defaultRemoteConfigPath {
+		t.Fatalf("expected existing runtime to restore default config path %q, got %q", defaultRemoteConfigPath, runtime.ConfigPath)
+	}
+	if runtime.RuntimeRoot != "" {
+		t.Fatalf("expected existing runtime to clear isolated runtime root, got %q", runtime.RuntimeRoot)
+	}
+	if runtime.AppDataPath != "" || runtime.UserDataPath != "" || runtime.LogPath != "" {
+		t.Fatalf("expected existing runtime to clear isolated paths, got appData=%q userData=%q log=%q", runtime.AppDataPath, runtime.UserDataPath, runtime.LogPath)
+	}
+	if runtime.MetaIDRPCPort != 0 {
+		t.Fatalf("expected existing runtime to clear derived rpc port, got %d", runtime.MetaIDRPCPort)
+	}
+}
+
+func TestBuildRemoteStartCommandBinaryModeInjectsRuntimeOverrides(t *testing.T) {
+	runtime := &remoteRuntime{
+		AppPath:       "~/tmp/idbots-alpha/IDBots.app",
+		AppBinaryPath: "~/tmp/idbots-alpha/IDBots.app/Contents/MacOS/IDBots",
+		BaseURL:       "http://127.0.0.1:62196",
+		RuntimeRoot:   "/tmp/idbots-alpha-remote-62196",
+		AppDataPath:   "/tmp/idbots-alpha-remote-62196/appData",
+		UserDataPath:  "/tmp/idbots-alpha-remote-62196/userData",
+		LogPath:       "/tmp/idbots-alpha-remote-62196/remote-app.log",
+		MetaIDRPCPort: 62197,
+	}
+
+	cmd, err := buildRemoteStartCommand(runtime, runOptions{RemoteLaunchMode: "binary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"nohup env",
+		"IDBOTS_APP_DATA_PATH='/tmp/idbots-alpha-remote-62196/appData'",
+		"IDBOTS_USER_DATA_PATH='/tmp/idbots-alpha-remote-62196/userData'",
+		"IDBOTS_MAN_P2P_LOCAL_BASE='http://127.0.0.1:62196'",
+		"IDBOTS_DISABLE_SINGLE_INSTANCE_LOCK=1",
+		"IDBOTS_METAID_RPC_PORT='62197'",
+		"\"$HOME/tmp/idbots-alpha/IDBots.app/Contents/MacOS/IDBots\"",
+		"> '/tmp/idbots-alpha-remote-62196/remote-app.log' 2>&1",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Fatalf("expected command to contain %q, got %q", want, cmd)
+		}
+	}
+}
