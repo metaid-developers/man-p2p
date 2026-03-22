@@ -29,7 +29,7 @@ const (
 	defaultRemoteBaseURL    = "http://127.0.0.1:7281"
 	defaultRemoteConfigPath = "~/Library/Application Support/IDBots/man-p2p-config.json"
 	defaultFallbackPinID    = "d7947500f7668e361bd84d20a45f49bb8e692d3c5ec1dc57310a8d8171f258f8i0"
-	defaultRemoteLaunchMode = "binary"
+	defaultRemoteLaunchMode = "open"
 )
 
 type p2pStatusEnvelope struct {
@@ -124,28 +124,59 @@ type acceptanceSummary struct {
 }
 
 func pickBootstrapAddr(status p2pStatusEnvelope, preferredIPv4 string) (string, error) {
+	candidates, err := bootstrapAddrCandidates(status, preferredIPv4)
+	if err != nil {
+		return "", err
+	}
+	return candidates[0], nil
+}
+
+func bootstrapAddrCandidates(status p2pStatusEnvelope, preferredIPv4 string) ([]string, error) {
 	if status.Data.PeerID == "" {
-		return "", errors.New("missing peer id")
+		return nil, errors.New("missing peer id")
 	}
 
 	preferred := strings.TrimSpace(preferredIPv4)
-	fallback := ""
+	preferredAddr := ""
+	ipv4Fallbacks := make([]string, 0, len(status.Data.ListenAddrs))
+	ipv6Fallbacks := make([]string, 0, len(status.Data.ListenAddrs))
+	seen := make(map[string]struct{}, len(status.Data.ListenAddrs))
 	for _, addr := range status.Data.ListenAddrs {
-		host, ok := extractIPv4Host(addr)
+		network, host, _, ok := extractTCPEndpoint(addr)
 		if !ok {
 			continue
 		}
-		if host == preferred {
-			return fmt.Sprintf("%s/p2p/%s", addr, status.Data.PeerID), nil
+		if isLoopbackOrUnspecified(host) {
+			continue
 		}
-		if fallback == "" && !isLoopbackOrUnspecified(host) {
-			fallback = addr
+		candidate := fmt.Sprintf("%s/p2p/%s", addr, status.Data.PeerID)
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if network == "ip4" && host == preferred {
+			preferredAddr = candidate
+			continue
+		}
+		if network == "ip4" {
+			ipv4Fallbacks = append(ipv4Fallbacks, candidate)
+			continue
+		}
+		if network == "ip6" {
+			ipv6Fallbacks = append(ipv6Fallbacks, candidate)
 		}
 	}
-	if fallback != "" {
-		return fmt.Sprintf("%s/p2p/%s", fallback, status.Data.PeerID), nil
+
+	candidates := make([]string, 0, len(status.Data.ListenAddrs))
+	if preferredAddr != "" {
+		candidates = append(candidates, preferredAddr)
 	}
-	return "", fmt.Errorf("no usable ipv4 listen addr found for peer %s", status.Data.PeerID)
+	candidates = append(candidates, ipv4Fallbacks...)
+	candidates = append(candidates, ipv6Fallbacks...)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no usable tcp listen addr found for peer %s", status.Data.PeerID)
+	}
+	return candidates, nil
 }
 
 func mergeP2PConfig(raw []byte, patch acceptanceConfigPatch) ([]byte, error) {
@@ -191,17 +222,36 @@ func mergeP2PConfig(raw []byte, patch acceptanceConfigPatch) ([]byte, error) {
 	return append(updated, '\n'), nil
 }
 
-func extractIPv4Host(addr string) (string, bool) {
+func extractTCPEndpoint(addr string) (string, string, string, bool) {
 	trimmed := strings.TrimSpace(addr)
 	parts := strings.Split(trimmed, "/")
-	if len(parts) < 5 || parts[1] != "ip4" || parts[3] != "tcp" {
-		return "", false
+	if len(parts) < 5 || parts[3] != "tcp" {
+		return "", "", "", false
+	}
+	network := strings.TrimSpace(parts[1])
+	if network != "ip4" && network != "ip6" {
+		return "", "", "", false
 	}
 	host := strings.TrimSpace(parts[2])
+	port := strings.TrimSpace(parts[4])
 	if net.ParseIP(host) == nil {
-		return "", false
+		return "", "", "", false
 	}
-	return host, true
+	if _, err := strconv.Atoi(port); err != nil {
+		return "", "", "", false
+	}
+	return network, host, port, true
+}
+
+func buildRemoteBootstrapProbeCommand(bootstrapAddr string) (string, error) {
+	network, host, port, ok := extractTCPEndpoint(bootstrapAddr)
+	if !ok {
+		return "", fmt.Errorf("unsupported bootstrap addr %q", bootstrapAddr)
+	}
+	if network == "ip6" {
+		return fmt.Sprintf("nc -6 -z -G 1 %s %s >/dev/null 2>&1", host, port), nil
+	}
+	return fmt.Sprintf("nc -z -G 1 %s %s >/dev/null 2>&1", host, port), nil
 }
 
 func isLoopbackOrUnspecified(host string) bool {
@@ -294,11 +344,11 @@ func runAcceptance(ctx context.Context, opts runOptions) (*acceptanceSummary, er
 	if err != nil {
 		return nil, fmt.Errorf("fetch local status: %w", err)
 	}
-	localBootstrap, err := pickBootstrapAddr(localStatus, opts.PreferredLocalIPv4)
+	localBootstrapCandidates, err := bootstrapAddrCandidates(localStatus, opts.PreferredLocalIPv4)
 	if err != nil {
 		return nil, fmt.Errorf("derive local bootstrap addr: %w", err)
 	}
-	logf("local peer %s bootstrap %s", localStatus.Data.PeerID, localBootstrap)
+	logf("local peer %s bootstrap candidates %v", localStatus.Data.PeerID, localBootstrapCandidates)
 
 	remote, err := prepareRemoteRuntime(ctx, opts)
 	if err != nil {
@@ -307,6 +357,11 @@ func runAcceptance(ctx context.Context, opts runOptions) (*acceptanceSummary, er
 	if opts.Cleanup {
 		defer cleanupRemoteRuntime(context.Background(), remote, opts)
 	}
+	localBootstrap, err := waitForRemoteBootstrapReachability(ctx, remote, opts, localBootstrapCandidates, opts.ConnectTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("wait remote bootstrap reachability: %w", err)
+	}
+	logf("selected local bootstrap %s", localBootstrap)
 
 	remotePatch := acceptancePatch([]string{localBootstrap})
 	if err := patchRemoteConfig(ctx, remote, opts, remotePatch); err != nil {
@@ -942,6 +997,33 @@ func waitForRemoteHealth(ctx context.Context, runtime *remoteRuntime, opts runOp
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("remote health %s not ready within %s", runtime.BaseURL, timeout)
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func waitForRemoteBootstrapReachability(ctx context.Context, runtime *remoteRuntime, opts runOptions, bootstrapAddrs []string, timeout time.Duration) (string, error) {
+	if len(bootstrapAddrs) == 0 {
+		return "", errors.New("no bootstrap addresses to probe")
+	}
+	deadline := time.Now().Add(timeout)
+	lastErrs := make([]string, 0, len(bootstrapAddrs))
+	for {
+		lastErrs = lastErrs[:0]
+		for _, bootstrapAddr := range bootstrapAddrs {
+			cmd, err := buildRemoteBootstrapProbeCommand(bootstrapAddr)
+			if err != nil {
+				lastErrs = append(lastErrs, fmt.Sprintf("%s (%v)", bootstrapAddr, err))
+				continue
+			}
+			if _, err := runRemoteCommand(ctx, runtime, opts, cmd); err == nil {
+				return bootstrapAddr, nil
+			} else {
+				lastErrs = append(lastErrs, fmt.Sprintf("%s (%v)", bootstrapAddr, err))
+			}
+		}
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("remote could not reach any bootstrap addr within %s: %s", timeout, strings.Join(lastErrs, "; "))
 		}
 		time.Sleep(1 * time.Second)
 	}

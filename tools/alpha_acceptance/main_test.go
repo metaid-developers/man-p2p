@@ -29,6 +29,63 @@ func TestPickBootstrapAddrPrefersRequestedIPv4(t *testing.T) {
 	}
 }
 
+func TestPickBootstrapAddrFallsBackToGlobalIPv6(t *testing.T) {
+	status := p2pStatusEnvelope{
+		Data: p2pStatusData{
+			PeerID: "12D3KooWLocalPeer",
+			ListenAddrs: []string{
+				"/ip4/127.0.0.1/tcp/4001",
+				"/ip6/::1/tcp/4001",
+				"/ip6/240e:3b3:f1f2:29c1:187e:1045:a71a:a083/tcp/4001",
+			},
+		},
+	}
+
+	got, err := pickBootstrapAddr(status, "192.168.3.30")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "/ip6/240e:3b3:f1f2:29c1:187e:1045:a71a:a083/tcp/4001/p2p/12D3KooWLocalPeer"
+	if got != want {
+		t.Fatalf("expected %s, got %s", want, got)
+	}
+}
+
+func TestBootstrapAddrCandidatesPreservePreferredIPv4BeforeFallbacks(t *testing.T) {
+	status := p2pStatusEnvelope{
+		Data: p2pStatusData{
+			PeerID: "12D3KooWLocalPeer",
+			ListenAddrs: []string{
+				"/ip4/127.0.0.1/tcp/4001",
+				"/ip4/10.211.55.2/tcp/4001",
+				"/ip4/192.168.3.30/tcp/4001",
+				"/ip6/::1/tcp/4001",
+				"/ip6/240e:3b3:f1f2:29c1:187e:1045:a71a:a083/tcp/4001",
+			},
+		},
+	}
+
+	got, err := bootstrapAddrCandidates(status, "192.168.3.30")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		"/ip4/192.168.3.30/tcp/4001/p2p/12D3KooWLocalPeer",
+		"/ip4/10.211.55.2/tcp/4001/p2p/12D3KooWLocalPeer",
+		"/ip6/240e:3b3:f1f2:29c1:187e:1045:a71a:a083/tcp/4001/p2p/12D3KooWLocalPeer",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}
+
 func TestMergeP2PConfigAppliesAcceptanceOverrides(t *testing.T) {
 	raw := []byte(`{
 		"p2p_sync_mode": "self",
@@ -271,5 +328,73 @@ func TestBuildRemoteStartCommandBinaryModeInjectsRuntimeOverrides(t *testing.T) 
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("expected command to contain %q, got %q", want, cmd)
 		}
+	}
+}
+
+func TestBuildRemoteStartCommandOpenModeUsesOpenCommand(t *testing.T) {
+	runtime := &remoteRuntime{
+		AppPath:       "~/tmp/idbots-alpha/IDBots.app",
+		AppBinaryPath: "~/tmp/idbots-alpha/IDBots.app/Contents/MacOS/IDBots",
+		BaseURL:       "http://127.0.0.1:62532",
+		RuntimeRoot:   "/tmp/idbots-alpha-remote-62532",
+		AppDataPath:   "/tmp/idbots-alpha-remote-62532/appData",
+		UserDataPath:  "/tmp/idbots-alpha-remote-62532/userData",
+		ConfigPath:    "/tmp/idbots-alpha-remote-62532/userData/man-p2p-config.json",
+		LogPath:       "/tmp/idbots-alpha-remote-62532/remote-app.log",
+		MetaIDRPCPort: 62533,
+	}
+
+	cmd, err := buildRemoteStartCommand(runtime, runOptions{RemoteLaunchMode: "open"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "open -n \"$HOME/tmp/idbots-alpha/IDBots.app\""
+	if cmd != want {
+		t.Fatalf("expected command %q, got %q", want, cmd)
+	}
+}
+
+func TestParseRunOptionsDefaultsRemoteLaunchModeToOpen(t *testing.T) {
+	opts, err := parseRunOptions([]string{
+		"--local-app", "/tmp/IDBots.app",
+		"--remote-user", "showpay",
+		"--remote-host", "192.168.3.52",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.RemoteLaunchMode != "open" {
+		t.Fatalf("expected default remote launch mode open, got %q", opts.RemoteLaunchMode)
+	}
+}
+
+func TestBuildRemoteBootstrapProbeCommandParsesIPv4TCPBootstrapAddr(t *testing.T) {
+	cmd, err := buildRemoteBootstrapProbeCommand("/ip4/192.168.3.30/tcp/64684/p2p/12D3KooWLocalPeer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "nc -z -G 1 192.168.3.30 64684 >/dev/null 2>&1"
+	if cmd != want {
+		t.Fatalf("expected probe command %q, got %q", want, cmd)
+	}
+}
+
+func TestBuildRemoteBootstrapProbeCommandParsesIPv6TCPBootstrapAddr(t *testing.T) {
+	cmd, err := buildRemoteBootstrapProbeCommand("/ip6/240e:3b3:f1f2:29c1:187e:1045:a71a:a083/tcp/64684/p2p/12D3KooWLocalPeer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "nc -6 -z -G 1 240e:3b3:f1f2:29c1:187e:1045:a71a:a083 64684 >/dev/null 2>&1"
+	if cmd != want {
+		t.Fatalf("expected probe command %q, got %q", want, cmd)
+	}
+}
+
+func TestBuildRemoteBootstrapProbeCommandRejectsMalformedAddr(t *testing.T) {
+	if _, err := buildRemoteBootstrapProbeCommand("/ip4/192.168.3.30/udp/64684/p2p/12D3KooWLocalPeer"); err == nil {
+		t.Fatal("expected malformed bootstrap addr to be rejected")
 	}
 }
