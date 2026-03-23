@@ -2,40 +2,53 @@
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
+## Start Here
+
+Read in this order:
+
+1. This `AGENTS.md`
+2. `localdocs/README.md` if it exists locally
+3. Relevant specs/plans under `docs/superpowers/` when the task is tied to the current IDBots P2P integration
+
+Keep `AGENTS.md` stable and durable. Put fast-changing local context, current baselines, recent pitfalls, and new-session prompts in `localdocs/`.
+
 ## Project Overview
 
-**man-indexer-v2** is a multi-chain blockchain indexer for the MetaID protocol. It indexes PIN inscriptions and MRC20 token operations across Bitcoin, Dogecoin, and MicroVision Chain (MVC), stores data in PebbleDB, and exposes a RESTful API via Gin.
+This repository started as **man-indexer-v2** and now also serves as **man-p2p**, the local-first MetaID indexer + P2P runtime embedded by IDBots.
+
+Current practical role:
+- expose the local HTTP API consumed by IDBots
+- run a libp2p node for peer discovery / pin sync
+- preserve fallback compatibility when no peers are available
+
+The current Alpha baseline is the local-first P2P integration used by IDBots `v0.1.100` on March 23, 2026. In this phase, P2P-backed PIN sync is the focus; chain-source indexing remains optional, and MRC20 catch-up is intentionally disabled in the P2P-first runtime path.
 
 ## Build & Run Commands
 
 ```bash
-# Build (Linux target from macOS, requires cross-compile toolchain + ZMQ)
-make mac
+# Build all release binaries
+make all
 
-# Build (native Linux)
-make linux
+# Focused P2P test suite
+make test
 
-# Run in regtest mode
-make run_regtest
-# equivalent to: CGO_ENABLED=1 go run app.go -test=2 -config=./config_regtest.toml
+# Alpha acceptance suite used during IDBots integration
+make alpha-test
 
-# Run tests (Go standard)
-go test ./...
+# Run the current app entrypoint with local p2p config
+go run . -config ./config.toml -server=1 -p2p-config ./p2p-config.json -data-dir ./man_p2p_data
 
-# Run a single test
-go test -run TestFunctionName ./path/to/package/
+# Run a specific package/test directly
+CGO_ENABLED=0 go test ./p2p -run TestLoadConfig -v -count=1
 
-# Run MRC20-specific tests
-go test -run TestMrc20 ./man/
-
-# Build MRC20 migration tool
-make mrc20_migration
-
-# Generate Swagger docs
+# Regenerate Swagger docs
 swag init -g app.go
 ```
 
-**Note**: CGO is required (ZMQ dependency via `github.com/pebbe/zmq4`). All builds need `CGO_ENABLED=1` except migration tools.
+**Note**:
+- Current release binaries are built with `CGO_ENABLED=0` via `Makefile`.
+- Some legacy indexer paths still depend on ZMQ / chain adapters; do not assume every package is exercised by the P2P alpha test suite.
+- When the task is about IDBots integration, validate the binary contract in this repo first, then sync into IDBots and verify there.
 
 ## Architecture
 
@@ -52,7 +65,7 @@ Each chain has its own implementation under `adapter/{bitcoin,dogecoin,microvisi
 
 ### Main Loop (`app.go`)
 
-`main()` → init config (TOML) → `man.InitAdapter()` → start API server (optional) → start ZMQ listener → run `IndexerRun()` every 10 seconds. MRC20 catch-up indexing runs after each main indexer loop.
+`main()` now initializes runtime config, optionally loads the P2P JSON config, starts the libp2p host/gossip/storage monitor, and conditionally enables the legacy chain adapters. IDBots currently relies on the local HTTP API and P2P host even when chain-source indexing is disabled.
 
 ### Core Packages
 
@@ -65,7 +78,20 @@ Each chain has its own implementation under `adapter/{bitcoin,dogecoin,microvisi
 | `api/` | Gin HTTP server, REST endpoints, Swagger docs, HTML templates |
 | `common/` | Config parsing (TOML), CLI flags, shared utilities |
 | `adapter/` | Chain/Indexer interfaces and per-chain implementations |
+| `p2p/` | Runtime config, libp2p host/bootstrap/relay, gossip, sync handlers, storage guardrails |
 | `web/` | Embedded static assets and HTML templates (`//go:embed`) |
+
+## IDBots Integration Notes
+
+- IDBots embeds platform binaries from this repo under `resources/man-p2p/`.
+- After changing runtime behavior that affects the bundled binary contract, rebuild the target binary here and then run `npm run sync:man-p2p` in the IDBots repo.
+- Development flow is usually:
+  1. change `man-p2p`
+  2. run focused Go tests here
+  3. build/sync the binary into IDBots
+  4. validate in IDBots dev runtime
+  5. validate again in packaged app builds for release/acceptance
+- Packaged macOS app testing should launch `IDBots.app` normally, not `IDBots.app/Contents/MacOS/IDBots` directly.
 
 ### MRC20 Token Protocol
 
@@ -119,3 +145,5 @@ TOML config files (`config.toml`, `config_regtest.toml`, etc.) with sections:
 - `MRC20_INDEXING_DESIGN.md` — Indexing architecture
 - `DOC_MELTDOWN.md` — PIN meltdown mechanics
 - `DOGECOIN_ADAPTER.md` — Dogecoin-specific implementation
+- `docs/DEPLOY_SOP.md` — deployment / health-check SOP
+- `docs/superpowers/specs/` — current P2P design docs used during the IDBots alpha work
