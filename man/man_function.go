@@ -277,6 +277,12 @@ func metaIdInfoParse(pinNode *pin.PinInscription, path string, metaIdData *map[s
 	if metaIdInfo.MetaId == "" {
 		metaIdInfo.MetaId = common.GetMetaIdByAddress(pinNode.Address)
 	}
+	if metaIdInfo.Address == "" {
+		metaIdInfo.Address = pinNode.Address
+	}
+	if metaIdInfo.GlobalMetaId == "" && pinNode.Address != "" {
+		metaIdInfo.GlobalMetaId = common.ConvertToGlobalMetaId(pinNode.Address)
+	}
 	if metaIdInfo.ChainName == "" {
 		metaIdInfo.ChainName = pinNode.ChainName
 	}
@@ -297,6 +303,7 @@ func metaIdInfoParse(pinNode *pin.PinInscription, path string, metaIdData *map[s
 		metaIdInfo.Background = fmt.Sprintf("/content/%s", pinNode.Id)
 	case "/info/chatpubkey":
 		metaIdInfo.ChatPubKey = string(pinNode.ContentBody)
+		metaIdInfo.ChatPubKeyId = pinNode.Id
 	}
 	(*metaIdData)[pinNode.Address] = metaIdInfo
 }

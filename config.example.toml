@@ -1,4 +1,4 @@
-# Sample local MVC config. Copy the repo template to config.toml for real local runtime values.
+# Copy this file to config.toml and fill in local RPC credentials or machine-specific paths.
 
 protocolID = "6d6574616964"
 module = []

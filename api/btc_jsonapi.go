@@ -257,7 +257,7 @@ func getInfoByAddress(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrServiceError)
 		return
 	}
-	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", metaInfo{info, "", false}))
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", metaInfo{enrichMetaIdInfo(info, address), "", false}))
 }
 
 func getInfoByMetaId(ctx *gin.Context) {
@@ -271,7 +271,7 @@ func getInfoByMetaId(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrServiceError)
 		return
 	}
-	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", metaInfo{info, "", false}))
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", metaInfo{enrichMetaIdInfo(info, ""), "", false}))
 }
 
 func getAllPinByPath(ctx *gin.Context) {

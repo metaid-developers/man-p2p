@@ -3,7 +3,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 LDFLAGS := -ldflags "-X man-p2p/common.Version=$(VERSION) -s -w"
 DIST    := dist
 
-.PHONY: all clean test alpha-test
+.PHONY: all clean test alpha-test run-local-mvc
 
 all: build-darwin-arm64 build-darwin-amd64 build-windows-amd64 build-linux-amd64
 
@@ -34,6 +34,9 @@ alpha-test:
 	CGO_ENABLED=0 go test ./p2p -run 'TestAlphaDualInstanceRealtimeSync|TestAlphaDualProcessRealtimeSync|TestLoadConfig|TestReloadConfig|TestChainSourceDefaultsToEnabled|TestLoadConfigCanDisableChainSource|TestPublishPinWithoutInitializedHost|TestInitHost|TestStorageLimitEnforcement|TestBlocklistOverridesAllowlist|TestSelectivePathMatch|TestOversizedPinStillPassesFilter|TestSelfMode|TestLoadOwnAddressesForSelfMode|TestSelfModeRequiresConfiguredOwnAddress|TestSelfModeBlockOverridesOwnAddress|TestBlockedPath|TestContentPull' -v -count=1 -timeout 60s
 	CGO_ENABLED=0 go test ./api -run 'TestP2PStatusEndpoint|TestP2PPeersEndpoint|TestConfigReloadEndpoint|TestAlphaPinMissReturnsNon2xx|TestAlphaContentMissReturnsNon2xx|TestAlphaMetadataOnlyContentContract|TestAlphaP2PStatusFields|TestAlphaConfigReloadUpdatesRuntimeFilterState' -v -count=1 -timeout 60s
 	CGO_ENABLED=0 go test ./man -run 'TestChatPubKeyParsed|TestIngestP2PPinStoresPinAndMetaIdInfo|TestInitRuntimeWithoutChainSourceSkipsAdapters' -v -count=1 -timeout 60s
+
+run-local-mvc:
+	CGO_ENABLED=0 go run . -chain mvc -config ./config.toml -server=1 -p2p-config ./p2p-config.json -data-dir ./man_p2p_data
 
 clean:
 	rm -rf $(DIST)

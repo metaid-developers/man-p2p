@@ -11,3 +11,9 @@ data_test/
 pebble_data/
 man-p2p
 localdocs/
+config.toml
+p2p-config.json
+.env
+.env.*
+*.local.toml
+*.local.json

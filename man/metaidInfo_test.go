@@ -11,8 +11,9 @@ import (
 // metaIdInfoParse does not attempt a PebbleStore DB lookup.
 func TestChatPubKeyParsed(t *testing.T) {
 	pinNode := &pin.PinInscription{
+		Id:          "chatpubkey-pin-id",
 		MetaId:      "test-metaid",
-		Address:     "1TestAddr",
+		Address:     "1GrqX7K9jdnUor8hAoAfDx99uFH2tT75Za",
 		Path:        "/info/chatpubkey",
 		ContentBody: []byte("02abc123...publickey"),
 	}
@@ -32,6 +33,12 @@ func TestChatPubKeyParsed(t *testing.T) {
 	}
 	if info.ChatPubKey != "02abc123...publickey" {
 		t.Errorf("chatpubkey not parsed correctly: got %q, want %q", info.ChatPubKey, "02abc123...publickey")
+	}
+	if info.ChatPubKeyId != "chatpubkey-pin-id" {
+		t.Errorf("chatpubkeyId not parsed correctly: got %q, want %q", info.ChatPubKeyId, "chatpubkey-pin-id")
+	}
+	if info.GlobalMetaId == "" {
+		t.Errorf("expected globalMetaId to be populated for a valid address")
 	}
 }
 

@@ -131,6 +131,7 @@ type MetaIdInfo struct {
 	Name          string `json:"name"`
 	NameId        string `json:"nameId"`
 	Address       string `json:"address"`
+	GlobalMetaId  string `json:"globalMetaId"`
 	Avatar        string `json:"avatar"`
 	AvatarId      string `json:"avatarId"`
 	NftAvatar     string `json:"nftAvatar"`
@@ -144,6 +145,7 @@ type MetaIdInfo struct {
 	Fdv           int64  `json:"fdv"`
 	Background    string `json:"background"`
 	ChatPubKey    string `json:"chatpubkey"`
+	ChatPubKeyId  string `json:"chatpubkeyId"`
 }
 type MetaIdDataValue struct {
 	ChainName string `json:"chainName"`
