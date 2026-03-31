@@ -42,6 +42,7 @@ type PinInscription struct {
 	Output                 string          `json:"output"`
 	OutputValue            int64           `json:"outputValue"`
 	Timestamp              int64           `json:"timestamp"`
+	SeenTime               int64           `json:"seenTime,omitempty"`
 	GenesisFee             int64           `json:"genesisFee"`
 	GenesisHeight          int64           `json:"genesisHeight"`
 	GenesisTransaction     string          `json:"genesisTransaction"`
@@ -181,6 +182,7 @@ type PinMsg struct {
 	CreateAddress string `json:"creator"`
 	InitialOwner  string `json:"initialOwner"`
 	Timestamp     int64  `json:"timestamp"`
+	SeenTime      int64  `json:"seenTime,omitempty"`
 }
 
 type BlockMsg struct {

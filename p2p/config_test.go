@@ -28,7 +28,12 @@ func TestLoadConfig(t *testing.T) {
         "p2p_selective_addresses": ["1A2B3C"],
         "p2p_max_content_size_kb": 512,
         "p2p_storage_limit_gb": 10,
-        "p2p_enable_relay": true
+        "p2p_enable_relay": true,
+        "p2p_listen_port": 4001,
+        "p2p_announce_addrs": [
+            "/ip4/8.217.14.206/tcp/4001",
+            "/dns4/manapi.metaid.io/tcp/4001"
+        ]
     }`)
 
 	if err := LoadConfig(path); err != nil {
@@ -46,6 +51,15 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if !got.EnableRelay {
 		t.Error("expected EnableRelay=true")
+	}
+	if got.ListenPort != 4001 {
+		t.Errorf("expected listen port 4001, got %d", got.ListenPort)
+	}
+	if len(got.AnnounceAddrs) != 2 {
+		t.Fatalf("expected 2 announce addrs, got %v", got.AnnounceAddrs)
+	}
+	if got.AnnounceAddrs[0] != "/ip4/8.217.14.206/tcp/4001" {
+		t.Errorf("unexpected first announce addr: %q", got.AnnounceAddrs[0])
 	}
 }
 

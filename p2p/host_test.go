@@ -11,6 +11,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
 func mustCIDR(t *testing.T, cidr string) net.Addr {
@@ -74,6 +75,60 @@ func TestBuildListenAddrStringsFallsBackToWildcardWhenNoSubnetMatch(t *testing.T
 		if got[i] != want[i] {
 			t.Fatalf("expected %v, got %v", want, got)
 		}
+	}
+}
+
+func TestBuildListenAddrStringsUsesConfiguredListenPort(t *testing.T) {
+	got := buildListenAddrStrings(P2PSyncConfig{
+		ListenPort: 4001,
+	}, nil)
+
+	want := []string{
+		"/ip4/0.0.0.0/tcp/4001",
+		"/ip6/::/tcp/4001",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
+	}
+}
+
+func TestBuildAnnounceAddrsParsesConfiguredMultiaddrs(t *testing.T) {
+	got, err := buildAnnounceAddrs(P2PSyncConfig{
+		ListenPort: 4001,
+		AnnounceAddrs: []string{
+			"/ip4/8.217.14.206/tcp/4001",
+			"/dns4/manapi.metaid.io/tcp/4001",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/8.217.14.206/tcp/4001"),
+		multiaddr.StringCast("/dns4/manapi.metaid.io/tcp/4001"),
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d announce addrs, got %d", len(want), len(got))
+	}
+	for i := range want {
+		if got[i].String() != want[i].String() {
+			t.Fatalf("expected %q, got %q", want[i], got[i])
+		}
+	}
+}
+
+func TestBuildAnnounceAddrsRejectsDynamicListenPort(t *testing.T) {
+	_, err := buildAnnounceAddrs(P2PSyncConfig{
+		AnnounceAddrs: []string{"/ip4/8.217.14.206/tcp/4001"},
+	})
+	if err == nil {
+		t.Fatal("expected error when announce addrs are configured without a fixed listen port")
 	}
 }
 

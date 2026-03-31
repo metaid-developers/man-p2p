@@ -11,8 +11,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bitcoinsv/bsvutil"
 	bsvwire "github.com/bitcoinsv/bsvd/wire"
 	"github.com/btcsuite/btcd/btcutil"
+	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/bytedance/sonic"
@@ -49,7 +51,7 @@ func GetTransactionWithCache(chainName string, txid string) (*btcutil.Tx, error)
 		if err != nil {
 			return nil, err
 		}
-		return result.(*btcutil.Tx), nil
+		return normalizeToBtcutilTx(result)
 	}
 
 	// 只有 Doge 链使用缓存优化
@@ -68,7 +70,40 @@ func GetTransactionWithCache(chainName string, txid string) (*btcutil.Tx, error)
 	if err != nil {
 		return nil, err
 	}
-	return tx.(*btcutil.Tx), nil
+	return normalizeToBtcutilTx(tx)
+}
+
+func normalizeToBtcutilTx(tx interface{}) (*btcutil.Tx, error) {
+	switch v := tx.(type) {
+	case *btcutil.Tx:
+		return v, nil
+	case *bsvutil.Tx:
+		return btcutil.NewTx(convertBsvMsgTxToBtc(v.MsgTx())), nil
+	default:
+		return nil, fmt.Errorf("unsupported tx type: %T", tx)
+	}
+}
+
+func convertBsvMsgTxToBtc(src *bsvwire.MsgTx) *btcwire.MsgTx {
+	dst := btcwire.NewMsgTx(src.Version)
+	dst.LockTime = src.LockTime
+
+	for _, in := range src.TxIn {
+		hash, err := btcchainhash.NewHash(in.PreviousOutPoint.Hash.CloneBytes())
+		if err != nil {
+			hash = &btcchainhash.Hash{}
+		}
+		prevOut := btcwire.NewOutPoint(hash, in.PreviousOutPoint.Index)
+		txIn := btcwire.NewTxIn(prevOut, append([]byte(nil), in.SignatureScript...), nil)
+		txIn.Sequence = in.Sequence
+		dst.AddTxIn(txIn)
+	}
+
+	for _, out := range src.TxOut {
+		dst.AddTxOut(btcwire.NewTxOut(out.Value, append([]byte(nil), out.PkScript...)))
+	}
+
+	return dst
 }
 
 func Mrc20Handle(chainName string, height int64, mrc20List []*pin.PinInscription, mrc20TransferPinTx map[string]struct{}, txInList []string, isMempool bool) {
@@ -1553,12 +1588,11 @@ func saveInvalidArrival(pinNode *pin.PinInscription, msg string) error {
 
 // getAddressFromOutput 从交易的指定 output 获取地址
 func getAddressFromOutput(chainName, txid string, outputIndex int) (string, error) {
-	tx, err := ChainAdapter[chainName].GetTransaction(txid)
+	txb, err := GetTransactionWithCache(chainName, txid)
 	if err != nil {
 		return "", fmt.Errorf("get transaction error: %w", err)
 	}
 
-	txb := tx.(*btcutil.Tx)
 	if outputIndex < 0 || outputIndex >= len(txb.MsgTx().TxOut) {
 		return "", fmt.Errorf("output index out of range: %d", outputIndex)
 	}
@@ -1579,9 +1613,8 @@ func getAddressFromOutput(chainName, txid string, outputIndex int) (string, erro
 // 当节点没有 txindex 时，可以通过区块高度从区块中获取交易
 func getAddressFromOutputWithHeight(chainName, txid string, outputIndex int, blockHeight int64) (string, error) {
 	// 先尝试直接获取交易
-	tx, err := ChainAdapter[chainName].GetTransaction(txid)
+	txb, err := GetTransactionWithCache(chainName, txid)
 	if err == nil {
-		txb := tx.(*btcutil.Tx)
 		if outputIndex < 0 || outputIndex >= len(txb.MsgTx().TxOut) {
 			return "", fmt.Errorf("output index out of range: %d", outputIndex)
 		}

@@ -1,4 +1,9 @@
 {
   "p2p_sync_mode": "full",
+  "p2p_listen_port": 4001,
+  "p2p_announce_addrs": [
+    "/ip4/REPLACE_WITH_PUBLIC_IP/tcp/4001",
+    "/dns4/REPLACE_WITH_PUBLIC_DNS/tcp/4001"
+  ],
   "p2p_enable_chain_source": true
 }

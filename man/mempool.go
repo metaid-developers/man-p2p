@@ -16,7 +16,8 @@ func handleMempoolPin(pinNode *pin.PinInscription) {
 		pinNode.OriginalId = strings.Replace(pinNode.Path, "@", "", -1)
 		handlePathAndOperation(&[]*pin.PinInscription{pinNode})
 	}
-	pinNode.Timestamp = time.Now().Unix()
+	now := time.Now().Unix()
+	applyMempoolSeenTime(pinNode, now, getExistingSeenTime(pinNode.Id))
 	pinNode.Number = -1
 	pinNode.GenesisHeight = -1 // mempool 标记
 	pinNode.ContentTypeDetect = common.DetectContentType(&pinNode.ContentBody)

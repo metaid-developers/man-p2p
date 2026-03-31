@@ -143,34 +143,53 @@ func ZmqRun() {
 
 }
 func doZmqRun(chain string, indexer adapter.Indexer) {
-	//mm := ManMempool{}
-	msg := make(chan pin.MempollChanMsg)
+	msg := make(chan pin.MempollChanMsg, 64)
 	go indexer.ZmqRun(msg)
-	for x := range msg {
-		for _, pinNode := range x.PinList {
-			onlyHost := common.Config.MetaSo.OnlyHost
-			if onlyHost != "" && pinNode.Host != onlyHost {
-				continue
-			}
-			// go handleUserInfo(pinNode)
-			node := pinNode
-			runMempoolTask(func() {
-				handleMempoolPin(node)
-			})
-			runMempoolTask(func() {
-				handleMetaIdInfo(&[]*pin.PinInscription{node})
-			})
-			// if !pinNode.IsTransfered {
-			// 	handleMempoolPin(pinNode)
-			// } else if pinNode.IsTransfered {
-			// 	handleMempoolTransferPin(pinNode)
-			// }
-		}
-		// list := []interface{}{x.Tx}
-		// if len(list) > 0 {
-		// 	mm.CheckMempoolHadle(chain, list)
-		// }
+	if err := syncExistingMempool(chain, ChainAdapter[chain], indexer, processMempoolPin); err != nil {
+		log.Printf("[WARN] startup mempool sync failed for %s: %v", chain, err)
 	}
+	for x := range msg {
+		processMempoolMsg(x)
+	}
+}
+
+func syncExistingMempool(chain string, chainAdapter adapter.Chain, indexer adapter.Indexer, handler func(*pin.PinInscription)) error {
+	txList, err := chainAdapter.GetMempoolTransactionList()
+	if err != nil {
+		return err
+	}
+	if len(txList) == 0 {
+		return nil
+	}
+	pinList, _ := indexer.CatchMempoolPins(txList)
+	for _, pinNode := range pinList {
+		handler(pinNode)
+	}
+	log.Printf("[Mempool] startup sync for %s: %d txs, %d pins", chain, len(txList), len(pinList))
+	return nil
+}
+
+func processMempoolMsg(x pin.MempollChanMsg) {
+	for _, pinNode := range x.PinList {
+		processMempoolPin(pinNode)
+	}
+}
+
+func processMempoolPin(pinNode *pin.PinInscription) {
+	if pinNode == nil {
+		return
+	}
+	onlyHost := common.Config.MetaSo.OnlyHost
+	if onlyHost != "" && pinNode.Host != onlyHost {
+		return
+	}
+	node := pinNode
+	runMempoolTask(func() {
+		handleMempoolPin(node)
+	})
+	runMempoolTask(func() {
+		handleMetaIdInfo(&[]*pin.PinInscription{node})
+	})
 }
 
 // IndexerRun 执行区块链索引

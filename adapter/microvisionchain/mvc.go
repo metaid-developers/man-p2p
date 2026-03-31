@@ -26,6 +26,12 @@ import (
 
 var (
 	client *rpcclient.Client
+	getRawMempool = func() ([]*chainhash.Hash, error) {
+		return client.GetRawMempool()
+	}
+	getRawTransaction = func(txHash *chainhash.Hash) (*bsvutil.Tx, error) {
+		return client.GetRawTransaction(txHash)
+	}
 )
 
 type MicroVisionChain struct {
@@ -163,6 +169,17 @@ func (chain *MicroVisionChain) GetCreatorAddress(txHashStr string, idx uint32, n
 	return
 }
 func (chain *MicroVisionChain) GetMempoolTransactionList() (list []interface{}, err error) {
+	txIdList, err := getRawMempool()
+	if err != nil {
+		return
+	}
+	for _, txHash := range txIdList {
+		tx, err := getRawTransaction(txHash)
+		if err != nil {
+			continue
+		}
+		list = append(list, tx.MsgTx())
+	}
 	return
 }
 

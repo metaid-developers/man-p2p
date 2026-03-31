@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ func InitHost(ctx context.Context, dataDir string) error {
 		return fmt.Errorf("identity: %w", err)
 	}
 
+	cfg := GetConfig()
 	natOpts := NATOptions()
 	ifaceAddrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -42,9 +44,20 @@ func InitHost(ctx context.Context, dataDir string) error {
 	}
 	allOpts := append([]libp2p.Option{
 		libp2p.Identity(privKey),
-		libp2p.ListenAddrStrings(buildListenAddrStrings(GetConfig(), ifaceAddrs)...),
+		libp2p.ListenAddrStrings(buildListenAddrStrings(cfg, ifaceAddrs)...),
 		libp2p.NATPortMap(),
 	}, natOpts...)
+	announceAddrs, err := buildAnnounceAddrs(cfg)
+	if err != nil {
+		return fmt.Errorf("announce addrs: %w", err)
+	}
+	if len(announceAddrs) > 0 {
+		allOpts = append(allOpts, libp2p.AddrsFactory(func([]multiaddr.Multiaddr) []multiaddr.Multiaddr {
+			out := make([]multiaddr.Multiaddr, len(announceAddrs))
+			copy(out, announceAddrs)
+			return out
+		}))
+	}
 	Node, err = libp2p.New(allOpts...)
 	if err != nil {
 		return fmt.Errorf("libp2p.New: %w", err)
@@ -64,14 +77,15 @@ func InitHost(ctx context.Context, dataDir string) error {
 }
 
 func buildListenAddrStrings(cfg P2PSyncConfig, ifaceAddrs []net.Addr) []string {
-	defaultAddrs := []string{"/ip4/0.0.0.0/tcp/0", "/ip6/::/tcp/0"}
+	port := listenPortSegment(cfg)
+	defaultAddrs := []string{"/ip4/0.0.0.0/tcp/" + port, "/ip6/::/tcp/" + port}
 	bootstrapIPv4s := extractBootstrapIPv4s(cfg.BootstrapNodes)
 	if len(bootstrapIPv4s) == 0 {
 		return defaultAddrs
 	}
 
 	seen := map[string]struct{}{}
-	listenAddrs := []string{"/ip4/127.0.0.1/tcp/0"}
+	listenAddrs := []string{"/ip4/127.0.0.1/tcp/" + port}
 	seen["127.0.0.1"] = struct{}{}
 
 	for _, addr := range ifaceAddrs {
@@ -90,7 +104,7 @@ func buildListenAddrStrings(cfg P2PSyncConfig, ifaceAddrs []net.Addr) []string {
 					break
 				}
 				seen[key] = struct{}{}
-				listenAddrs = append(listenAddrs, fmt.Sprintf("/ip4/%s/tcp/0", key))
+				listenAddrs = append(listenAddrs, fmt.Sprintf("/ip4/%s/tcp/%s", key, port))
 				break
 			}
 		}
@@ -99,7 +113,45 @@ func buildListenAddrStrings(cfg P2PSyncConfig, ifaceAddrs []net.Addr) []string {
 	if len(listenAddrs) == 1 {
 		return defaultAddrs
 	}
-	return append(listenAddrs, "/ip6/::/tcp/0")
+	return append(listenAddrs, "/ip6/::/tcp/"+port)
+}
+
+func listenPortSegment(cfg P2PSyncConfig) string {
+	if cfg.ListenPort > 0 {
+		return strconv.Itoa(cfg.ListenPort)
+	}
+	return "0"
+}
+
+func buildAnnounceAddrs(cfg P2PSyncConfig) ([]multiaddr.Multiaddr, error) {
+	if len(cfg.AnnounceAddrs) == 0 {
+		return nil, nil
+	}
+	if cfg.ListenPort <= 0 {
+		return nil, fmt.Errorf("p2p_announce_addrs requires p2p_listen_port > 0")
+	}
+
+	port := strconv.Itoa(cfg.ListenPort)
+	out := make([]multiaddr.Multiaddr, 0, len(cfg.AnnounceAddrs))
+	for _, raw := range cfg.AnnounceAddrs {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		addr, err := multiaddr.NewMultiaddr(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid announce addr %q: %w", raw, err)
+		}
+		tcpPort, err := addr.ValueForProtocol(multiaddr.P_TCP)
+		if err != nil {
+			return nil, fmt.Errorf("announce addr %q must include tcp port: %w", raw, err)
+		}
+		if tcpPort != port {
+			return nil, fmt.Errorf("announce addr %q must use tcp port %s", raw, port)
+		}
+		out = append(out, addr)
+	}
+	return out, nil
 }
 
 func extractBootstrapIPv4s(addrs []string) []net.IP {

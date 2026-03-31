@@ -63,6 +63,7 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 	//保存PIN数据
 	if len(*pinList) > 0 {
 		//fmt.Println("SetAllPins start height:", height, " Num:", len(pinList))
+		pd.preserveSeenTimes(*pinList)
 		pd.Database.SetAllPins(height, *pinList, 20000)
 		tmp := (*pinList)[0]
 		blockKey := fmt.Sprintf("blocktime_%s_%d", chainName, height)
