@@ -43,6 +43,7 @@ func (c *PresenceCache) Observe(receivedFrom string, ann PresenceAnnouncement, r
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.pruneExpiredLocked(receivedAt)
 
 	for _, raw := range ann.GlobalMetaIDs {
 		globalMetaID, ok := canonicalPresenceGlobalMetaID(raw)
@@ -60,6 +61,19 @@ func (c *PresenceCache) Observe(receivedFrom string, ann PresenceAnnouncement, r
 			c.entries[globalMetaID] = peers
 		}
 		peers[peerID] = expiresAt
+	}
+}
+
+func (c *PresenceCache) pruneExpiredLocked(now time.Time) {
+	for globalMetaID, peers := range c.entries {
+		for peerID, expiresAt := range peers {
+			if !now.Before(expiresAt) {
+				delete(peers, peerID)
+			}
+		}
+		if len(peers) == 0 {
+			delete(c.entries, globalMetaID)
+		}
 	}
 }
 
