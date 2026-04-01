@@ -12,6 +12,150 @@ const (
 	maxPresenceTTLSeconds = 120
 )
 
+type PresenceBotState struct {
+	LastSeenSec  int64    `json:"lastSeenSec,omitempty"`
+	ExpiresAtSec int64    `json:"expiresAtSec,omitempty"`
+	PeerIDs      []string `json:"peerIds"`
+}
+
+type PresenceStatus struct {
+	Healthy               bool                        `json:"healthy"`
+	PeerCount             int                         `json:"peerCount"`
+	UnhealthyReason       string                      `json:"unhealthyReason,omitempty"`
+	LastConfigReloadError string                      `json:"lastConfigReloadError,omitempty"`
+	NowSec                int64                       `json:"nowSec"`
+	OnlineBots            map[string]PresenceBotState `json:"onlineBots"`
+}
+
+var (
+	presenceSubsystemStateMu      sync.RWMutex
+	presenceSubsystemReady        bool
+	presenceLastConfigReloadError string
+
+	presenceStatusTestMu       sync.RWMutex
+	presenceStatusTestOverride *PresenceStatus
+)
+
+func GetPresenceStatus() PresenceStatus {
+	presenceStatusTestMu.RLock()
+	override := clonePresenceStatusPtr(presenceStatusTestOverride)
+	presenceStatusTestMu.RUnlock()
+	if override != nil {
+		if override.NowSec == 0 {
+			override.NowSec = time.Now().Unix()
+		}
+		return *override
+	}
+
+	status := PresenceStatus{
+		Healthy:         false,
+		PeerCount:       0,
+		UnhealthyReason: "presence_not_initialized",
+		NowSec:          time.Now().Unix(),
+		OnlineBots:      map[string]PresenceBotState{},
+	}
+	if Node != nil {
+		status.PeerCount = len(Node.Network().Peers())
+	}
+
+	presenceSubsystemStateMu.RLock()
+	status.LastConfigReloadError = presenceLastConfigReloadError
+	ready := presenceSubsystemReady
+	presenceSubsystemStateMu.RUnlock()
+
+	if ready {
+		status.UnhealthyReason = "no_active_peers"
+		if status.PeerCount >= 1 {
+			status.Healthy = true
+			status.UnhealthyReason = ""
+		}
+	}
+	return status
+}
+
+func SetPresenceSubsystemReady(ready bool) {
+	presenceSubsystemStateMu.Lock()
+	presenceSubsystemReady = ready
+	presenceSubsystemStateMu.Unlock()
+}
+
+func SetPresenceLastConfigReloadError(message string) {
+	presenceSubsystemStateMu.Lock()
+	presenceLastConfigReloadError = strings.TrimSpace(message)
+	presenceSubsystemStateMu.Unlock()
+}
+
+func SetPresenceStatusForTests(status PresenceStatus) {
+	cloned := clonePresenceStatus(status)
+
+	presenceStatusTestMu.Lock()
+	presenceStatusTestOverride = &cloned
+	presenceStatusTestMu.Unlock()
+}
+
+func ResetPresenceStatusForTests() {
+	presenceStatusTestMu.Lock()
+	presenceStatusTestOverride = nil
+	presenceStatusTestMu.Unlock()
+}
+
+func clonePresenceStatusPtr(status *PresenceStatus) *PresenceStatus {
+	if status == nil {
+		return nil
+	}
+	cloned := clonePresenceStatus(*status)
+	return &cloned
+}
+
+func clonePresenceStatus(status PresenceStatus) PresenceStatus {
+	status.OnlineBots = canonicalPresenceBotStates(status.OnlineBots)
+	if status.OnlineBots == nil {
+		status.OnlineBots = map[string]PresenceBotState{}
+	}
+	return status
+}
+
+func canonicalPresenceBotStates(raw map[string]PresenceBotState) map[string]PresenceBotState {
+	if len(raw) == 0 {
+		return map[string]PresenceBotState{}
+	}
+
+	out := make(map[string]PresenceBotState, len(raw))
+	for rawGlobalMetaID, rawState := range raw {
+		globalMetaID, ok := canonicalPresenceGlobalMetaID(rawGlobalMetaID)
+		if !ok {
+			continue
+		}
+		out[globalMetaID] = mergePresenceBotState(out[globalMetaID], rawState)
+	}
+	return out
+}
+
+func mergePresenceBotState(base PresenceBotState, next PresenceBotState) PresenceBotState {
+	if next.LastSeenSec > base.LastSeenSec {
+		base.LastSeenSec = next.LastSeenSec
+	}
+	if next.ExpiresAtSec > base.ExpiresAtSec {
+		base.ExpiresAtSec = next.ExpiresAtSec
+	}
+
+	peerSet := make(map[string]struct{}, len(base.PeerIDs)+len(next.PeerIDs))
+	for _, rawPeerID := range append(append([]string{}, base.PeerIDs...), next.PeerIDs...) {
+		peerID := strings.TrimSpace(rawPeerID)
+		if peerID == "" {
+			continue
+		}
+		peerSet[peerID] = struct{}{}
+	}
+
+	base.PeerIDs = base.PeerIDs[:0]
+	for peerID := range peerSet {
+		base.PeerIDs = append(base.PeerIDs, peerID)
+	}
+	sort.Strings(base.PeerIDs)
+	return base
+}
+
 type PresenceAnnouncement struct {
 	SchemaVersion int      `json:"schemaVersion"`
 	PeerID        string   `json:"peerId"`
@@ -99,7 +243,7 @@ func (c *PresenceCache) Snapshot(now time.Time) map[string][]string {
 }
 
 type presenceMembership struct {
-	mu         sync.RWMutex
+	mu        sync.RWMutex
 	globalIDs map[string]struct{}
 }
 
