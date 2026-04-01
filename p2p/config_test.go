@@ -153,3 +153,48 @@ func TestLoadConfigCanDisableChainSource(t *testing.T) {
 		t.Fatal("expected chain source to be disabled by config")
 	}
 }
+
+func TestLoadConfigIncludesPresenceGlobalMetaIDs(t *testing.T) {
+	path := writeTempConfig(t, `{
+		"p2p_presence_global_metaids": ["idaaa", "idbbb"]
+	}`)
+
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+
+	got := GetConfig()
+	if len(got.PresenceGlobalMetaIDs) != 2 {
+		t.Fatalf("expected 2 presence global metaids, got %v", got.PresenceGlobalMetaIDs)
+	}
+	if got.PresenceGlobalMetaIDs[0] != "idaaa" || got.PresenceGlobalMetaIDs[1] != "idbbb" {
+		t.Fatalf("unexpected presence global metaids: %v", got.PresenceGlobalMetaIDs)
+	}
+}
+
+func TestReloadConfigUpdatesPresenceGlobalMetaIDs(t *testing.T) {
+	path := writeTempConfig(t, `{
+		"p2p_presence_global_metaids": ["idold"]
+	}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := GetConfig().PresenceGlobalMetaIDs; len(got) != 1 || got[0] != "idold" {
+		t.Fatalf("expected [idold], got %v", got)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_presence_global_metaids":["idnew1","idnew2"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := GetConfig().PresenceGlobalMetaIDs
+	if len(got) != 2 {
+		t.Fatalf("expected 2 presence global metaids after reload, got %v", got)
+	}
+	if got[0] != "idnew1" || got[1] != "idnew2" {
+		t.Fatalf("unexpected presence global metaids after reload: %v", got)
+	}
+}
