@@ -1,9 +1,13 @@
 package p2p
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 func TestPresenceCacheCanonicalizesGlobalMetaID(t *testing.T) {
@@ -131,4 +135,123 @@ func TestPresenceCachePrunesExpiredEntriesOnObserve(t *testing.T) {
 	if !hasFresh {
 		t.Fatalf("expected fresh entry to remain after pruning, cache=%v", cache.entries)
 	}
+}
+
+func TestGetPresenceStatusDefaultsToPresenceNotInitialized(t *testing.T) {
+	restorePresenceStatusTestState(t)
+
+	status := GetPresenceStatus()
+	if status.Healthy {
+		t.Fatalf("expected default presence status to be unhealthy, got %#v", status)
+	}
+	if status.PeerCount != 0 {
+		t.Fatalf("expected peerCount 0 by default, got %#v", status)
+	}
+	if status.UnhealthyReason != "presence_not_initialized" {
+		t.Fatalf("expected presence_not_initialized, got %#v", status)
+	}
+	if status.NowSec <= 0 {
+		t.Fatalf("expected nowSec to be populated, got %#v", status)
+	}
+	if status.OnlineBots == nil || len(status.OnlineBots) != 0 {
+		t.Fatalf("expected empty onlineBots map, got %#v", status.OnlineBots)
+	}
+}
+
+func TestGetPresenceStatusReadyWithoutActivePeersIsUnhealthy(t *testing.T) {
+	restorePresenceStatusTestState(t)
+
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	Node = host
+	SetPresenceSubsystemReady(true)
+
+	status := GetPresenceStatus()
+	if status.Healthy {
+		t.Fatalf("expected ready status without peers to remain unhealthy, got %#v", status)
+	}
+	if status.PeerCount != 0 {
+		t.Fatalf("expected peerCount 0 without peers, got %#v", status)
+	}
+	if status.UnhealthyReason != "no_active_peers" {
+		t.Fatalf("expected no_active_peers, got %#v", status)
+	}
+}
+
+func TestGetPresenceStatusReadyWithActivePeerIsHealthy(t *testing.T) {
+	restorePresenceStatusTestState(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	hostA, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostA.Close()
+
+	hostB, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hostB.Close()
+
+	if err := hostB.Connect(ctx, peer.AddrInfo{ID: hostA.ID(), Addrs: hostA.Addrs()}); err != nil {
+		t.Fatal(err)
+	}
+
+	Node = hostA
+	SetPresenceSubsystemReady(true)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(Node.Network().Peers()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	status := GetPresenceStatus()
+	if !status.Healthy {
+		t.Fatalf("expected ready status with active peers to be healthy, got %#v", status)
+	}
+	if status.PeerCount < 1 {
+		t.Fatalf("expected peerCount >= 1 with active peers, got %#v", status)
+	}
+	if status.UnhealthyReason != "" {
+		t.Fatalf("expected empty unhealthyReason for healthy status, got %#v", status)
+	}
+}
+
+func restorePresenceStatusTestState(t *testing.T) {
+	t.Helper()
+
+	originalNode := Node
+	presenceSubsystemStateMu.RLock()
+	originalReady := presenceSubsystemReady
+	originalReloadError := presenceLastConfigReloadError
+	presenceSubsystemStateMu.RUnlock()
+
+	presenceStatusTestMu.RLock()
+	originalOverride := clonePresenceStatusPtr(presenceStatusTestOverride)
+	presenceStatusTestMu.RUnlock()
+
+	Node = nil
+	SetPresenceSubsystemReady(false)
+	SetPresenceLastConfigReloadError("")
+	ResetPresenceStatusForTests()
+
+	t.Cleanup(func() {
+		Node = originalNode
+
+		presenceSubsystemStateMu.Lock()
+		presenceSubsystemReady = originalReady
+		presenceLastConfigReloadError = originalReloadError
+		presenceSubsystemStateMu.Unlock()
+
+		presenceStatusTestMu.Lock()
+		presenceStatusTestOverride = originalOverride
+		presenceStatusTestMu.Unlock()
+	})
 }
