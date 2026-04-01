@@ -70,7 +70,6 @@ type presenceRuntimeOptions struct {
 
 type presenceRuntime struct {
 	host               host.Host
-	ps                 *pubsub.PubSub
 	topic              *pubsub.Topic
 	sub                *pubsub.Subscription
 	cache              *PresenceCache
@@ -82,6 +81,7 @@ type presenceRuntime struct {
 	now                func() time.Time
 
 	closeOnce sync.Once
+	ctx       context.Context
 	cancel    context.CancelFunc
 
 	broadcastMu      sync.Mutex
@@ -126,7 +126,7 @@ func InitPresence(ctx context.Context) error {
 	}
 
 	SetPresenceSubsystemReady(true)
-	runtime.startBroadcastLoop(ctx)
+	runtime.startBroadcastLoop()
 	return nil
 }
 
@@ -163,7 +163,6 @@ func newPresenceRuntime(ctx context.Context, h host.Host, ps *pubsub.PubSub, opt
 	runtimeCtx, cancel := context.WithCancel(ctx)
 	runtime := &presenceRuntime{
 		host:               h,
-		ps:                 ps,
 		topic:              topic,
 		sub:                sub,
 		cache:              NewPresenceCache(),
@@ -173,11 +172,12 @@ func newPresenceRuntime(ctx context.Context, h host.Host, ps *pubsub.PubSub, opt
 		jitterRange:        opts.jitterRange,
 		runtimeMode:        opts.runtimeMode,
 		now:                opts.now,
+		ctx:                runtimeCtx,
 		cancel:             cancel,
 	}
 	runtime.applyDefaults()
 
-	go runtime.receiveLoop(runtimeCtx)
+	go runtime.receiveLoop()
 
 	return runtime, nil
 }
@@ -204,9 +204,9 @@ func (r *presenceRuntime) applyDefaults() {
 	}
 }
 
-func (r *presenceRuntime) receiveLoop(ctx context.Context) {
+func (r *presenceRuntime) receiveLoop() {
 	for {
-		msg, err := r.sub.Next(ctx)
+		msg, err := r.sub.Next(r.ctx)
 		if err != nil {
 			return
 		}
@@ -223,7 +223,7 @@ func (r *presenceRuntime) receiveLoop(ctx context.Context) {
 	}
 }
 
-func (r *presenceRuntime) startBroadcastLoop(ctx context.Context) {
+func (r *presenceRuntime) startBroadcastLoop() {
 	r.broadcastMu.Lock()
 	if r.broadcastStarted {
 		r.broadcastMu.Unlock()
@@ -240,14 +240,14 @@ func (r *presenceRuntime) startBroadcastLoop(ctx context.Context) {
 		}()
 
 		for {
-			if err := r.publishNow(ctx); err != nil && ctx.Err() == nil {
+			if err := r.publishNow(r.ctx); err != nil && r.ctx.Err() == nil {
 				log.Printf("presence: publish failed: %v", err)
 			}
 
 			delay := r.nextBroadcastDelay()
 			timer := time.NewTimer(delay)
 			select {
-			case <-ctx.Done():
+			case <-r.ctx.Done():
 				timer.Stop()
 				return
 			case <-timer.C:

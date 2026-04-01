@@ -39,10 +39,7 @@ func TestPresenceAnnouncementPropagatesAndExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	broadcastCtx, stopBroadcasts := context.WithCancel(ctx)
-	defer stopBroadcasts()
-
-	runtimeA, err := newPresenceRuntime(broadcastCtx, nodeA, psA, presenceRuntimeOptions{
+	runtimeA, err := newPresenceRuntime(ctx, nodeA, psA, presenceRuntimeOptions{
 		localGlobalMetaIDs: func() []string { return []string{"idq1providera"} },
 		broadcastInterval:  50 * time.Millisecond,
 		ttlSec:             1,
@@ -66,11 +63,12 @@ func TestPresenceAnnouncementPropagatesAndExpires(t *testing.T) {
 	}
 	defer runtimeB.close()
 
-	runtimeA.startBroadcastLoop(broadcastCtx)
+	runtimeA.startBroadcastLoop()
 
 	waitForPresenceBot(t, runtimeB, "idq1providera", nodeA.ID().String(), 3*time.Second)
 
-	stopBroadcasts()
+	runtimeA.close()
+	waitForPresenceBroadcastLoopStopped(t, runtimeA, 2*time.Second)
 
 	waitForPresenceBotGone(t, runtimeB, "idq1providera", 3*time.Second)
 }
@@ -104,4 +102,22 @@ func waitForPresenceBotGone(t *testing.T, runtime *presenceRuntime, globalMetaID
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("expected %s to expire within %s, last status=%#v", globalMetaID, timeout, runtime.status())
+}
+
+func waitForPresenceBroadcastLoopStopped(t *testing.T, runtime *presenceRuntime, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		runtime.broadcastMu.Lock()
+		started := runtime.broadcastStarted
+		runtime.broadcastMu.Unlock()
+		if !started {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	runtime.broadcastMu.Lock()
+	started := runtime.broadcastStarted
+	runtime.broadcastMu.Unlock()
+	t.Fatalf("expected broadcast loop to stop within %s, started=%v", timeout, started)
 }

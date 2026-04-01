@@ -29,6 +29,7 @@ var (
 	KadDHT                 *dht.IpfsDHT
 	bootstrapRetryInterval = 2 * time.Second
 	bootstrapRetryAttempts = 15
+	nodeMu                 sync.RWMutex
 	bootstrapLoopMu        sync.Mutex
 	bootstrapLoopRunning   bool
 )
@@ -61,12 +62,13 @@ func InitHost(ctx context.Context, dataDir string) error {
 			return out
 		}))
 	}
-	Node, err = libp2p.New(allOpts...)
+	node, err := libp2p.New(allOpts...)
 	if err != nil {
 		return fmt.Errorf("libp2p.New: %w", err)
 	}
+	setNode(node)
 
-	KadDHT, err = dht.New(ctx, Node, dht.Mode(dht.ModeAuto))
+	KadDHT, err = dht.New(ctx, node, dht.Mode(dht.ModeAuto))
 	if err != nil {
 		return fmt.Errorf("dht.New: %w", err)
 	}
@@ -214,15 +216,20 @@ func connectBootstrapNodesOnce(ctx context.Context) {
 			log.Printf("p2p: invalid bootstrap peer addr %q: %v", addrStr, err)
 			continue
 		}
-		if Node == nil {
+		node := currentNode()
+		if node == nil {
 			return
 		}
 		for attempt := 1; attempt <= bootstrapRetryAttempts; attempt++ {
-			if Node.Network().Connectedness(pi.ID) == network.Connected {
+			node = currentNode()
+			if node == nil {
+				return
+			}
+			if node.Network().Connectedness(pi.ID) == network.Connected {
 				break
 			}
-			clearBootstrapDialBackoff(pi.ID)
-			err = Node.Connect(ctx, *pi)
+			clearBootstrapDialBackoff(node, pi.ID)
+			err = node.Connect(ctx, *pi)
 			if err == nil {
 				log.Printf("p2p: bootstrap connected %s on attempt %d", pi.ID, attempt)
 				break
@@ -240,15 +247,27 @@ func connectBootstrapNodesOnce(ctx context.Context) {
 	}
 }
 
-func clearBootstrapDialBackoff(peerID peer.ID) {
-	if Node == nil {
+func clearBootstrapDialBackoff(node host.Host, peerID peer.ID) {
+	if node == nil {
 		return
 	}
-	swarmNet, ok := Node.Network().(*swarm.Swarm)
+	swarmNet, ok := node.Network().(*swarm.Swarm)
 	if !ok {
 		return
 	}
 	swarmNet.Backoff().Clear(peerID)
+}
+
+func currentNode() host.Host {
+	nodeMu.RLock()
+	defer nodeMu.RUnlock()
+	return Node
+}
+
+func setNode(node host.Host) {
+	nodeMu.Lock()
+	Node = node
+	nodeMu.Unlock()
 }
 
 func loadOrCreateIdentity(dataDir string) (crypto.PrivKey, error) {
@@ -287,9 +306,12 @@ func CloseHost() error {
 		_ = KadDHT.Close()
 		KadDHT = nil
 	}
-	if Node != nil {
-		err := Node.Close()
-		Node = nil
+	nodeMu.Lock()
+	node := Node
+	Node = nil
+	nodeMu.Unlock()
+	if node != nil {
+		err := node.Close()
 		return err
 	}
 	return nil
