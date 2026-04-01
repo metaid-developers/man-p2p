@@ -63,6 +63,8 @@ func main() {
 	} else {
 		if err := p2p.InitGossip(ctx); err != nil {
 			log.Printf("warn: p2p gossip init failed: %v", err)
+		} else if err := p2p.InitPresence(ctx); err != nil {
+			log.Printf("warn: p2p presence init failed: %v", err)
 		}
 		p2p.RegisterSyncHandler()
 		p2p.StartStorageMonitor(ctx, dataDir)

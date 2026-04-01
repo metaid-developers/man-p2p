@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
@@ -28,6 +29,8 @@ var (
 	KadDHT                 *dht.IpfsDHT
 	bootstrapRetryInterval = 2 * time.Second
 	bootstrapRetryAttempts = 15
+	bootstrapLoopMu        sync.Mutex
+	bootstrapLoopRunning   bool
 )
 
 func InitHost(ctx context.Context, dataDir string) error {
@@ -171,6 +174,34 @@ func extractBootstrapIPv4s(addrs []string) []net.IP {
 }
 
 func connectBootstrapNodes(ctx context.Context) {
+	bootstrapLoopMu.Lock()
+	if bootstrapLoopRunning {
+		bootstrapLoopMu.Unlock()
+		return
+	}
+	bootstrapLoopRunning = true
+	bootstrapLoopMu.Unlock()
+	defer func() {
+		bootstrapLoopMu.Lock()
+		bootstrapLoopRunning = false
+		bootstrapLoopMu.Unlock()
+	}()
+
+	connectBootstrapNodesOnce(ctx)
+
+	ticker := time.NewTicker(bootstrapRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			connectBootstrapNodesOnce(ctx)
+		}
+	}
+}
+
+func connectBootstrapNodesOnce(ctx context.Context) {
 	cfg := GetConfig()
 	for _, addrStr := range cfg.BootstrapNodes {
 		ma, err := multiaddr.NewMultiaddr(addrStr)
@@ -242,8 +273,24 @@ func loadOrCreateIdentity(dataDir string) (crypto.PrivKey, error) {
 }
 
 func CloseHost() error {
+	closePresenceRuntime()
+	if sub != nil {
+		sub.Cancel()
+		sub = nil
+	}
+	if topic != nil {
+		_ = topic.Close()
+		topic = nil
+	}
+	PS = nil
+	if KadDHT != nil {
+		_ = KadDHT.Close()
+		KadDHT = nil
+	}
 	if Node != nil {
-		return Node.Close()
+		err := Node.Close()
+		Node = nil
+		return err
 	}
 	return nil
 }
