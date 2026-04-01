@@ -1,11 +1,9 @@
 package p2p
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"sync"
-	"time"
 )
 
 type P2PSyncConfig struct {
@@ -53,11 +51,7 @@ func ReloadConfig() error {
 	configMu.Unlock()
 	reloadPresenceLocalMembershipFromConfig()
 	if currentNode() != nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(bootstrapRetryAttempts)*bootstrapRetryInterval)
-			defer cancel()
-			connectBootstrapNodesOnce(ctx)
-		}()
+		triggerBootstrapReconnect()
 	}
 	return nil
 }

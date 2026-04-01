@@ -167,7 +167,7 @@ func TestGetPresenceStatusReadyWithoutActivePeersIsUnhealthy(t *testing.T) {
 	}
 	defer host.Close()
 
-	Node = host
+	setNode(host)
 	SetPresenceSubsystemReady(true)
 
 	status := GetPresenceStatus()
@@ -204,7 +204,7 @@ func TestGetPresenceStatusReadyWithActivePeerIsHealthy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	Node = hostA
+	setNode(hostA)
 	SetPresenceSubsystemReady(true)
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -227,7 +227,7 @@ func TestGetPresenceStatusReadyWithActivePeerIsHealthy(t *testing.T) {
 func restorePresenceStatusTestState(t *testing.T) {
 	t.Helper()
 
-	originalNode := Node
+	originalNode := currentNode()
 	presenceSubsystemStateMu.RLock()
 	originalReady := presenceSubsystemReady
 	originalReloadError := presenceLastConfigReloadError
@@ -237,13 +237,13 @@ func restorePresenceStatusTestState(t *testing.T) {
 	originalOverride := clonePresenceStatusPtr(presenceStatusTestOverride)
 	presenceStatusTestMu.RUnlock()
 
-	Node = nil
+	setNode(nil)
 	SetPresenceSubsystemReady(false)
 	SetPresenceLastConfigReloadError("")
 	ResetPresenceStatusForTests()
 
 	t.Cleanup(func() {
-		Node = originalNode
+		setNode(originalNode)
 
 		presenceSubsystemStateMu.Lock()
 		presenceSubsystemReady = originalReady

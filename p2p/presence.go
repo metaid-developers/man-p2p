@@ -101,11 +101,12 @@ var (
 )
 
 func InitPresence(ctx context.Context) error {
-	if Node == nil || PS == nil {
+	node := currentNode()
+	if node == nil || PS == nil {
 		return fmt.Errorf("p2p presence requires initialized host and pubsub")
 	}
 
-	runtime, err := newPresenceRuntime(ctx, Node, PS, presenceRuntimeOptions{
+	runtime, err := newPresenceRuntime(ctx, node, PS, presenceRuntimeOptions{
 		localGlobalMetaIDs: LocalPresenceGlobalMetaIDs,
 		broadcastInterval:  defaultPresenceBroadcastInterval,
 		ttlSec:             defaultPresenceAnnouncementTTL,
@@ -347,8 +348,9 @@ func GetPresenceStatus() PresenceStatus {
 		NowSec:          time.Now().Unix(),
 		OnlineBots:      map[string]PresenceBotState{},
 	}
-	if Node != nil {
-		status.PeerCount = len(Node.Network().Peers())
+	node := currentNode()
+	if node != nil {
+		status.PeerCount = len(node.Network().Peers())
 	}
 
 	currentPresenceRuntimeMu.RLock()
@@ -362,6 +364,14 @@ func GetPresenceStatus() PresenceStatus {
 	status.LastConfigReloadError = presenceLastConfigReloadError
 	ready := presenceSubsystemReady
 	presenceSubsystemStateMu.RUnlock()
+
+	if ready && runtime == nil {
+		status.UnhealthyReason = "no_active_peers"
+		if status.PeerCount >= 1 {
+			status.Healthy = true
+			status.UnhealthyReason = ""
+		}
+	}
 
 	if !ready {
 		status.Healthy = false

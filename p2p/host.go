@@ -32,6 +32,7 @@ var (
 	nodeMu                 sync.RWMutex
 	bootstrapLoopMu        sync.Mutex
 	bootstrapLoopRunning   bool
+	bootstrapWakeCh        = make(chan struct{}, 1)
 )
 
 func InitHost(ctx context.Context, dataDir string) error {
@@ -197,10 +198,32 @@ func connectBootstrapNodes(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-bootstrapWakeCh:
+			connectBootstrapNodesOnce(ctx)
 		case <-ticker.C:
 			connectBootstrapNodesOnce(ctx)
 		}
 	}
+}
+
+func triggerBootstrapReconnect() {
+	bootstrapLoopMu.Lock()
+	running := bootstrapLoopRunning
+	bootstrapLoopMu.Unlock()
+
+	if running {
+		select {
+		case bootstrapWakeCh <- struct{}{}:
+		default:
+		}
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(bootstrapRetryAttempts)*bootstrapRetryInterval)
+		defer cancel()
+		connectBootstrapNodesOnce(ctx)
+	}()
 }
 
 func connectBootstrapNodesOnce(ctx context.Context) {
