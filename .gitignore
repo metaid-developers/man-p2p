@@ -13,6 +13,7 @@ man-p2p
 localdocs/
 config.toml
 p2p-config.json
+.worktrees/
 .env
 .env.*
 *.local.toml
