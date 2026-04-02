@@ -267,10 +267,12 @@ func (r *presenceRuntime) publishNow(ctx context.Context) error {
 		return nil
 	}
 
+	publishedAt := r.now()
+
 	announcement := PresenceAnnouncement{
 		SchemaVersion: presenceSchemaVersion,
 		PeerID:        r.host.ID().String(),
-		SentAt:        r.now().Unix(),
+		SentAt:        publishedAt.Unix(),
 		TTLSec:        clampPresenceTTLSeconds(r.ttlSec),
 		RuntimeMode:   r.runtimeMode,
 		GlobalMetaIDs: globalMetaIDs,
@@ -280,7 +282,12 @@ func (r *presenceRuntime) publishNow(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return r.topic.Publish(ctx, data)
+	if err := r.topic.Publish(ctx, data); err != nil {
+		return err
+	}
+
+	r.cache.Observe(r.host.ID().String(), announcement, publishedAt)
+	return nil
 }
 
 func (r *presenceRuntime) nextBroadcastDelay() time.Duration {

@@ -73,6 +73,51 @@ func TestPresenceAnnouncementPropagatesAndExpires(t *testing.T) {
 	waitForPresenceBotGone(t, runtimeB, "idq1providera", 3*time.Second)
 }
 
+func TestPresencePublishMakesLocalBotVisibleImmediately(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	node, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.Close()
+
+	ps, err := pubsub.NewGossipSub(ctx, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runtime, err := newPresenceRuntime(ctx, node, ps, presenceRuntimeOptions{
+		localGlobalMetaIDs: func() []string { return []string{"idq1localvisible"} },
+		broadcastInterval:  50 * time.Millisecond,
+		ttlSec:             55,
+		jitterRange:        0,
+		runtimeMode:        "p2p-only",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer runtime.close()
+
+	if err := runtime.publishNow(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	status := runtime.status()
+	bot, ok := status.OnlineBots["idq1localvisible"]
+	if !ok {
+		t.Fatalf("expected local published bot to be visible immediately, status=%#v", status)
+	}
+
+	for _, peerID := range bot.PeerIDs {
+		if peerID == node.ID().String() {
+			return
+		}
+	}
+	t.Fatalf("expected local peer id %s in %#v", node.ID(), bot)
+}
+
 func waitForPresenceBot(t *testing.T, runtime *presenceRuntime, globalMetaID, peerID string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
