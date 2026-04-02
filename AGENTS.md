@@ -41,6 +41,9 @@ go run . -config ./config.toml -server=1 -p2p-config ./p2p-config.json -data-dir
 # Run a specific package/test directly
 CGO_ENABLED=0 go test ./p2p -run TestLoadConfig -v -count=1
 
+# Run a macOS cgo-backed smoke test through the repo wrapper
+make cgo-api-smoke
+
 # Regenerate Swagger docs
 swag init -g app.go
 ```
@@ -49,6 +52,7 @@ swag init -g app.go
 - Current release binaries are built with `CGO_ENABLED=0` via `Makefile`.
 - Some legacy indexer paths still depend on ZMQ / chain adapters; do not assume every package is exercised by the P2P alpha test suite.
 - When the task is about IDBots integration, validate the binary contract in this repo first, then sync into IDBots and verify there.
+- If plain macOS cgo commands hit `github.com/DataDog/zstd` header errors from `/usr/local/include`, use `./tools/with-macos-cgo-env.sh ...` or the `make cgo-*` wrapper targets instead of swapping compression implementations.
 
 ## Architecture
 

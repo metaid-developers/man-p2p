@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,103 @@ func TestLoadConfigCanDisableChainSource(t *testing.T) {
 	}
 	if GetConfig().ChainSourceEnabled() {
 		t.Fatal("expected chain source to be disabled by config")
+	}
+}
+
+func TestLoadConfigIncludesPresenceGlobalMetaIDs(t *testing.T) {
+	path := writeTempConfig(t, `{
+		"p2p_presence_global_metaids": ["idaaa", "idbbb"]
+	}`)
+
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+
+	got := GetConfig()
+	if len(got.PresenceGlobalMetaIDs) != 2 {
+		t.Fatalf("expected 2 presence global metaids, got %v", got.PresenceGlobalMetaIDs)
+	}
+	if got.PresenceGlobalMetaIDs[0] != "idaaa" || got.PresenceGlobalMetaIDs[1] != "idbbb" {
+		t.Fatalf("unexpected presence global metaids: %v", got.PresenceGlobalMetaIDs)
+	}
+}
+
+func TestReloadConfigUpdatesPresenceGlobalMetaIDs(t *testing.T) {
+	path := writeTempConfig(t, `{
+		"p2p_presence_global_metaids": ["idold"]
+	}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := GetConfig().PresenceGlobalMetaIDs; len(got) != 1 || got[0] != "idold" {
+		t.Fatalf("expected [idold], got %v", got)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_presence_global_metaids":["idnew1","idnew2"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := GetConfig().PresenceGlobalMetaIDs
+	if len(got) != 2 {
+		t.Fatalf("expected 2 presence global metaids after reload, got %v", got)
+	}
+	if got[0] != "idnew1" || got[1] != "idnew2" {
+		t.Fatalf("unexpected presence global metaids after reload: %v", got)
+	}
+}
+
+func TestReloadConfigTracksPresenceLastConfigReloadError(t *testing.T) {
+	restorePresenceStatusTestState(t)
+
+	path := writeTempConfig(t, `{"p2p_sync_mode":"self"}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_sync_mode":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ReloadConfig()
+	if err == nil {
+		t.Fatal("expected reload with malformed json to fail")
+	}
+
+	status := GetPresenceStatus()
+	if strings.TrimSpace(status.LastConfigReloadError) == "" {
+		t.Fatalf("expected lastConfigReloadError to be populated after reload failure, got %#v", status)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_sync_mode":"full"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := GetPresenceStatus().LastConfigReloadError; got != "" {
+		t.Fatalf("expected reload error to clear after successful reload, got %q", got)
+	}
+}
+
+func TestCGOMakeTargetsForceCGOEnabled(t *testing.T) {
+	data, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	requiredSnippets := []string{
+		"cgo-api-smoke:\n\tCGO_ENABLED=1 $(CGO_ENV_WRAPPER) go test ./api -run TestP2PStatusEndpoint -count=1",
+		"cgo-test-all:\n\tCGO_ENABLED=1 $(CGO_ENV_WRAPPER) go test ./...",
+	}
+
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Fatalf("expected Makefile to contain %q, got:\n%s", snippet, content)
+		}
 	}
 }

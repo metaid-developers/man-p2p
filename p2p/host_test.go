@@ -10,6 +10,8 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	libp2pcrypto "github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 )
@@ -191,6 +193,18 @@ func waitForPeerConnection(t *testing.T, expected peer.ID, timeout time.Duration
 	t.Fatalf("expected peer %s to connect within %s, peers=%v", expected, timeout, Node.Network().Peers())
 }
 
+func waitForPeerDisconnection(t *testing.T, expected peer.ID, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if Node.Network().Connectedness(expected) != network.Connected {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("expected peer %s to disconnect within %s, peers=%v", expected, timeout, Node.Network().Peers())
+}
+
 func TestConnectBootstrapNodesRetriesUntilPeerBecomesAvailable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -250,4 +264,87 @@ func TestConnectBootstrapNodesRetriesUntilPeerBecomesAvailable(t *testing.T) {
 	defer bootstrapHost.Close()
 
 	waitForPeerConnection(t, bootstrapHost.ID(), 2*time.Second)
+}
+
+func TestBootstrapReconnectLoopReconnectsAfterDisconnect(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	originalNode := Node
+	originalRetryInterval := bootstrapRetryInterval
+	originalRetryAttempts := bootstrapRetryAttempts
+	originalConfig := GetConfig()
+	t.Cleanup(func() {
+		Node = originalNode
+		bootstrapRetryInterval = originalRetryInterval
+		bootstrapRetryAttempts = originalRetryAttempts
+		configMu.Lock()
+		currentConfig = originalConfig
+		configMu.Unlock()
+	})
+
+	localHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer localHost.Close()
+	Node = localHost
+
+	bootstrapPort := reserveTCPPort(t)
+	bootstrapPriv, _, err := libp2pcrypto.GenerateEd25519Key(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapPeerID, err := peer.IDFromPrivateKey(bootstrapPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	configMu.Lock()
+	currentConfig = P2PSyncConfig{
+		BootstrapNodes: []string{
+			"/ip4/127.0.0.1/tcp/" + strconv.Itoa(bootstrapPort) + "/p2p/" + bootstrapPeerID.String(),
+		},
+	}
+	configMu.Unlock()
+
+	bootstrapRetryInterval = 50 * time.Millisecond
+	bootstrapRetryAttempts = 20
+
+	bootstrapHost, err := libp2p.New(
+		libp2p.Identity(bootstrapPriv),
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/"+strconv.Itoa(bootstrapPort)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go connectBootstrapNodes(ctx)
+
+	waitForPeerConnection(t, bootstrapHost.ID(), 2*time.Second)
+
+	if err := bootstrapHost.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	waitForPeerDisconnection(t, bootstrapPeerID, 2*time.Second)
+
+	var replacementHost host.Host
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		replacementHost, err = libp2p.New(
+			libp2p.Identity(bootstrapPriv),
+			libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/"+strconv.Itoa(bootstrapPort)),
+		)
+		if err == nil {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("restart bootstrap host on same addr: %v", err)
+	}
+	defer replacementHost.Close()
+
+	waitForPeerConnection(t, replacementHost.ID(), 2*time.Second)
 }
