@@ -36,20 +36,24 @@ func LoadConfig(path string) error {
 
 func ReloadConfig() error {
 	if configPath == "" {
+		SetPresenceLastConfigReloadError("")
 		return nil
 	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		SetPresenceLastConfigReloadError(err.Error())
 		return err
 	}
 	var cfg P2PSyncConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
+		SetPresenceLastConfigReloadError(err.Error())
 		return err
 	}
 	configMu.Lock()
 	currentConfig = cfg
 	configMu.Unlock()
 	reloadPresenceLocalMembershipFromConfig()
+	SetPresenceLastConfigReloadError("")
 	if currentNode() != nil {
 		triggerBootstrapReconnect()
 	}

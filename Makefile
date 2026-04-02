@@ -38,10 +38,10 @@ alpha-test:
 
 # macOS hosts with polluted /usr/local/include can use these targets without swapping zstd implementations.
 cgo-api-smoke:
-	$(CGO_ENV_WRAPPER) go test ./api -run TestP2PStatusEndpoint -count=1
+	CGO_ENABLED=1 $(CGO_ENV_WRAPPER) go test ./api -run TestP2PStatusEndpoint -count=1
 
 cgo-test-all:
-	$(CGO_ENV_WRAPPER) go test ./...
+	CGO_ENABLED=1 $(CGO_ENV_WRAPPER) go test ./...
 
 run-local-mvc:
 	CGO_ENABLED=0 go run . -chain mvc -config ./config.toml -server=1 -p2p-config ./p2p-config.json -data-dir ./man_p2p_data

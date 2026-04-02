@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,5 +197,58 @@ func TestReloadConfigUpdatesPresenceGlobalMetaIDs(t *testing.T) {
 	}
 	if got[0] != "idnew1" || got[1] != "idnew2" {
 		t.Fatalf("unexpected presence global metaids after reload: %v", got)
+	}
+}
+
+func TestReloadConfigTracksPresenceLastConfigReloadError(t *testing.T) {
+	restorePresenceStatusTestState(t)
+
+	path := writeTempConfig(t, `{"p2p_sync_mode":"self"}`)
+	if err := LoadConfig(path); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_sync_mode":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ReloadConfig()
+	if err == nil {
+		t.Fatal("expected reload with malformed json to fail")
+	}
+
+	status := GetPresenceStatus()
+	if strings.TrimSpace(status.LastConfigReloadError) == "" {
+		t.Fatalf("expected lastConfigReloadError to be populated after reload failure, got %#v", status)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"p2p_sync_mode":"full"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReloadConfig(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := GetPresenceStatus().LastConfigReloadError; got != "" {
+		t.Fatalf("expected reload error to clear after successful reload, got %q", got)
+	}
+}
+
+func TestCGOMakeTargetsForceCGOEnabled(t *testing.T) {
+	data, err := os.ReadFile("../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := string(data)
+	requiredSnippets := []string{
+		"cgo-api-smoke:\n\tCGO_ENABLED=1 $(CGO_ENV_WRAPPER) go test ./api -run TestP2PStatusEndpoint -count=1",
+		"cgo-test-all:\n\tCGO_ENABLED=1 $(CGO_ENV_WRAPPER) go test ./...",
+	}
+
+	for _, snippet := range requiredSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Fatalf("expected Makefile to contain %q, got:\n%s", snippet, content)
+		}
 	}
 }

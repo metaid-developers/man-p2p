@@ -620,6 +620,17 @@ func canonicalPresenceGlobalMetaID(raw string) (string, bool) {
 	if strings.HasPrefix(canonical, "metaid:") {
 		return "", false
 	}
+	if len(canonical) < 4 || !strings.HasPrefix(canonical, "id") {
+		return "", false
+	}
+	switch canonical[2] {
+	case 'q', 'p', 'z', 'r', 'y', 't':
+	default:
+		return "", false
+	}
+	if canonical[3] != '1' {
+		return "", false
+	}
 	return canonical, true
 }
 

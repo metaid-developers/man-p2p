@@ -16,18 +16,18 @@ func TestPresenceCacheCanonicalizesGlobalMetaID(t *testing.T) {
 
 	cache.Observe("peer-A", PresenceAnnouncement{
 		TTLSec:        30,
-		GlobalMetaIDs: []string{"  IDAbC  ", "metaid:idabc", "  ", "idabc"},
+		GlobalMetaIDs: []string{"  IDQ1ABC  ", "metaid:idq1abc", "  ", "idq1abc"},
 	}, receivedAt)
 
 	snapshot := cache.Snapshot(receivedAt.Add(2 * time.Second))
-	peers, ok := snapshot["idabc"]
+	peers, ok := snapshot["idq1abc"]
 	if !ok {
-		t.Fatalf("expected canonical key idabc in snapshot, got %v", snapshot)
+		t.Fatalf("expected canonical key idq1abc in snapshot, got %v", snapshot)
 	}
 	if !reflect.DeepEqual(peers, []string{"peer-A"}) {
-		t.Fatalf("expected one peer for idabc, got %v", peers)
+		t.Fatalf("expected one peer for idq1abc, got %v", peers)
 	}
-	if _, bad := snapshot["IDAbC"]; bad {
+	if _, bad := snapshot["IDQ1ABC"]; bad {
 		t.Fatalf("expected no non-canonical key, got %v", snapshot)
 	}
 }
@@ -38,24 +38,24 @@ func TestPresenceCacheUsesReceiveTimeAndClampsTTL(t *testing.T) {
 
 	cache.Observe("peer-A", PresenceAnnouncement{
 		TTLSec:        999, // clamp to 120
-		GlobalMetaIDs: []string{"idlong"},
+		GlobalMetaIDs: []string{"idq1long"},
 	}, receivedAt)
 	cache.Observe("peer-A", PresenceAnnouncement{
 		TTLSec:        0, // clamp to 1
-		GlobalMetaIDs: []string{"idshort"},
+		GlobalMetaIDs: []string{"idq1short"},
 	}, receivedAt)
 
 	at2s := cache.Snapshot(receivedAt.Add(2 * time.Second))
-	if _, ok := at2s["idlong"]; !ok {
-		t.Fatalf("expected idlong to still be active at +2s, got %v", at2s)
+	if _, ok := at2s["idq1long"]; !ok {
+		t.Fatalf("expected idq1long to still be active at +2s, got %v", at2s)
 	}
-	if _, ok := at2s["idshort"]; ok {
-		t.Fatalf("expected idshort to expire by +2s due to ttl clamp, got %v", at2s)
+	if _, ok := at2s["idq1short"]; ok {
+		t.Fatalf("expected idq1short to expire by +2s due to ttl clamp, got %v", at2s)
 	}
 
 	at121s := cache.Snapshot(receivedAt.Add(121 * time.Second))
-	if _, ok := at121s["idlong"]; ok {
-		t.Fatalf("expected idlong to expire by +121s due to ttl clamp, got %v", at121s)
+	if _, ok := at121s["idq1long"]; ok {
+		t.Fatalf("expected idq1long to expire by +121s due to ttl clamp, got %v", at121s)
 	}
 }
 
@@ -65,15 +65,15 @@ func TestPresenceCacheAggregatesOneGlobalMetaIDAcrossMultiplePeers(t *testing.T)
 
 	cache.Observe("peer-A", PresenceAnnouncement{
 		TTLSec:        30,
-		GlobalMetaIDs: []string{"  idshared "},
+		GlobalMetaIDs: []string{"  idq1shared "},
 	}, receivedAt)
 	cache.Observe("peer-B", PresenceAnnouncement{
 		TTLSec:        30,
-		GlobalMetaIDs: []string{"IDSHARED"},
+		GlobalMetaIDs: []string{"IDQ1SHARED"},
 	}, receivedAt.Add(time.Second))
 
 	snapshot := cache.Snapshot(receivedAt.Add(5 * time.Second))
-	peers := snapshot["idshared"]
+	peers := snapshot["idq1shared"]
 	if !reflect.DeepEqual(peers, []string{"peer-A", "peer-B"}) {
 		t.Fatalf("expected aggregated peers [peer-A peer-B], got %v", peers)
 	}
@@ -85,7 +85,7 @@ func TestPresenceCacheRejectsMetaIDPrefixedForm(t *testing.T) {
 
 	cache.Observe("peer-A", PresenceAnnouncement{
 		TTLSec:        30,
-		GlobalMetaIDs: []string{"metaid:IDABC"},
+		GlobalMetaIDs: []string{"metaid:IDQ1ABC"},
 	}, receivedAt)
 
 	snapshot := cache.Snapshot(receivedAt.Add(time.Second))
@@ -101,11 +101,11 @@ func TestPresenceCacheExpiryUsesReceiveTimeNotSentAt(t *testing.T) {
 	cache.Observe("peer-A", PresenceAnnouncement{
 		SentAt:        receivedAt.Add(-24 * time.Hour).Unix(),
 		TTLSec:        30,
-		GlobalMetaIDs: []string{"id-receive-based"},
+		GlobalMetaIDs: []string{"idq1receivebased"},
 	}, receivedAt)
 
 	snapshot := cache.Snapshot(receivedAt.Add(10 * time.Second))
-	if _, ok := snapshot["id-receive-based"]; !ok {
+	if _, ok := snapshot["idq1receivebased"]; !ok {
 		t.Fatalf("expected entry to remain active based on receive time despite old sentAt, got %v", snapshot)
 	}
 }
@@ -116,17 +116,17 @@ func TestPresenceCachePrunesExpiredEntriesOnObserve(t *testing.T) {
 
 	cache.Observe("peer-old", PresenceAnnouncement{
 		TTLSec:        1,
-		GlobalMetaIDs: []string{"id-expired"},
+		GlobalMetaIDs: []string{"idq1expired"},
 	}, t0)
 
 	cache.Observe("peer-new", PresenceAnnouncement{
 		TTLSec:        30,
-		GlobalMetaIDs: []string{"id-fresh"},
+		GlobalMetaIDs: []string{"idq1fresh"},
 	}, t0.Add(10*time.Second))
 
 	cache.mu.RLock()
-	_, hasExpired := cache.entries["id-expired"]
-	_, hasFresh := cache.entries["id-fresh"]
+	_, hasExpired := cache.entries["idq1expired"]
+	_, hasFresh := cache.entries["idq1fresh"]
 	cache.mu.RUnlock()
 
 	if hasExpired {
@@ -134,6 +134,27 @@ func TestPresenceCachePrunesExpiredEntriesOnObserve(t *testing.T) {
 	}
 	if !hasFresh {
 		t.Fatalf("expected fresh entry to remain after pruning, cache=%v", cache.entries)
+	}
+}
+
+func TestPresenceCacheRejectsInvalidRawGlobalMetaID(t *testing.T) {
+	cache := NewPresenceCache()
+	receivedAt := time.Unix(1_700_000_000, 0)
+
+	cache.Observe("peer-A", PresenceAnnouncement{
+		TTLSec:        30,
+		GlobalMetaIDs: []string{"idabc", "id-receive-based", "idq1valid"},
+	}, receivedAt)
+
+	snapshot := cache.Snapshot(receivedAt.Add(time.Second))
+	if _, ok := snapshot["idq1valid"]; !ok {
+		t.Fatalf("expected valid raw globalMetaId to remain, got %v", snapshot)
+	}
+	if _, ok := snapshot["idabc"]; ok {
+		t.Fatalf("expected invalid raw globalMetaId idabc to be rejected, got %v", snapshot)
+	}
+	if _, ok := snapshot["id-receive-based"]; ok {
+		t.Fatalf("expected invalid raw globalMetaId id-receive-based to be rejected, got %v", snapshot)
 	}
 }
 
