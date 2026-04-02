@@ -30,6 +30,8 @@ require (
 	google.golang.org/protobuf v1.36.11
 )
 
+replace github.com/DataDog/zstd => ./third_party/datadog-zstd
+
 require (
 	filippo.io/bigmod v0.1.1-0.20260103110540-f8a47775ebe5 // indirect
 	filippo.io/keygen v0.0.0-20260114151900-8e2790ea4c5b // indirect
