@@ -71,15 +71,15 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 		// Broadcast new PINs via P2P GossipSub
 		for _, pinNode := range *pinList {
 			p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
-				PinId:     pinNode.Id,
-				Path:      pinNode.Path,
-				Address:   pinNode.Address,
-				MetaId:    pinNode.MetaId,
-				ChainName: pinNode.ChainName,
-				Timestamp: pinNode.Timestamp,
+				PinId:         pinNode.Id,
+				Path:          pinNode.Path,
+				Address:       pinNode.Address,
+				MetaId:        pinNode.MetaId,
+				ChainName:     pinNode.ChainName,
+				Timestamp:     pinNode.Timestamp,
 				GenesisHeight: pinNode.GenesisHeight,
-				Confirmed: pinNode.GenesisHeight > 0,
-				SizeBytes: int64(pinNode.ContentLength),
+				Confirmed:     pinNode.GenesisHeight > 0,
+				SizeBytes:     int64(pinNode.ContentLength),
 			})
 		}
 	}
@@ -98,7 +98,7 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 	}
 
 	// 处理 MRC20（只有当 MRC20 进度已追上时才处理）
-	if isModuleEnabled("mrc20") {
+	if Mrc20RuntimeEnabled() {
 		pd.handleMrc20(chainName, height, pinList, txInList)
 	}
 
@@ -124,7 +124,7 @@ func (pd *PebbleData) doMrc20OnlyRun(chainName string, height int64) (err error)
 	}
 
 	// 只处理 MRC20
-	if isModuleEnabled("mrc20") {
+	if Mrc20RuntimeEnabled() {
 		pd.handleMrc20(chainName, height, pinList, txInList)
 	}
 
@@ -456,6 +456,13 @@ func isModuleEnabled(moduleName string) bool {
 		}
 	}
 	return false
+}
+
+func Mrc20RuntimeEnabled() bool {
+	if common.Config == nil {
+		return false
+	}
+	return common.Config.Sync.Mrc20Only || isModuleEnabled("mrc20")
 }
 
 // handleMrc20 处理 MRC20 相关交易

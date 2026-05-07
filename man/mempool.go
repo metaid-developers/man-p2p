@@ -40,10 +40,17 @@ func handleMempoolPin(pinNode *pin.PinInscription) {
 	handNotifcation(pinNode)
 
 	// 处理 mempool 中的 MRC20
-	if strings.HasPrefix(pinNode.Path, "/ft/mrc20/") && isModuleEnabled("mrc20") {
+	if mempoolMrc20Enabled(pinNode) {
 		log.Printf("[Mempool] 🎯 MRC20 PIN detected, calling handleMempoolMrc20: path=%s, pinId=%s", pinNode.Path, pinNode.Id)
 		handleMempoolMrc20(pinNode)
 	}
+}
+
+func mempoolMrc20Enabled(pinNode *pin.PinInscription) bool {
+	if pinNode == nil {
+		return false
+	}
+	return strings.HasPrefix(pinNode.Path, "/ft/mrc20/") && Mrc20RuntimeEnabled()
 }
 
 // handleMempoolMrc20 处理 mempool 中的 MRC20 交易

@@ -37,7 +37,10 @@ type syncTestIndexer struct {
 
 func (i *syncTestIndexer) InitIndexer() {}
 func (i *syncTestIndexer) CatchPins(blockHeight int64) (*[]*pin.PinInscription, *[]string, *map[string]string) {
-	return nil, nil, nil
+	pins := i.pins
+	txIns := i.txIns
+	creatorMap := map[string]string{}
+	return &pins, &txIns, &creatorMap
 }
 func (i *syncTestIndexer) CatchPinsByTx(msgTx interface{}, blockHeight int64, timestamp int64, blockHash string, merkleRoot string, txIndex int) []*pin.PinInscription {
 	return nil

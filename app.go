@@ -85,19 +85,22 @@ func main() {
 		go man.ZmqRun()
 	}
 
-	// MRC20 catch-up disabled in man-p2p phase 1 — asset parsing not enabled this phase
-	// man.Mrc20CatchUpRun()
+	if runtimeMRC20Enabled(chainSourceEnabled) {
+		man.Mrc20CatchUpRun()
+	}
 
-	// Execute statistics; Mrc20Only stat goroutines disabled in man-p2p phase 1
-	go pebblestore.StatMetaId(man.PebbleStore.Database)
-	go pebblestore.StatPinSort(man.PebbleStore.Database)
+	if !common.Config.Sync.Mrc20Only {
+		go pebblestore.StatMetaId(man.PebbleStore.Database)
+		go pebblestore.StatPinSort(man.PebbleStore.Database)
+	}
 
 	for {
 		if chainSourceEnabled {
 			man.IndexerRun(common.TestNet)
 
-			// MRC20 catch-up disabled in man-p2p phase 1
-			// man.Mrc20CatchUpRun()
+			if runtimeMRC20Enabled(chainSourceEnabled) {
+				man.Mrc20CatchUpRun()
+			}
 
 			man.CheckNewBlock()
 		}

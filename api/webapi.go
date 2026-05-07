@@ -10,6 +10,7 @@ import (
 	"man-p2p/api/respond"
 	"man-p2p/common"
 	"man-p2p/man"
+	"man-p2p/p2p"
 	"man-p2p/pebblestore"
 	"man-p2p/pin"
 	"net/http"
@@ -126,20 +127,11 @@ func Start(f embed.FS) {
 	//debug api
 	r.GET("/debug/count", debugCount)
 	r.GET("/debug/sync", debugSync)
-	// MRC20 routes disabled in man-p2p phase 1 — asset parsing not enabled this phase
-	// r.GET("/mrc20/info/:id", mrc20Info)
-	// r.GET("/mrc20/holders/:id/:page", mrc20Holders)
-	// r.GET("/mrc20/history/:id/:page", mrc20History)
-	// r.GET("/mrc20/address/:id/:address/:page", mrc20AddressHistory)
-	// r.GET("/mrc20/:page", mrc20List)
-	// MRC721 routes disabled in man-p2p phase 1 — asset parsing not enabled this phase
-	// r.GET("/mrc721/:page", mrc721List)
-	// r.GET("/mrc721/item/list/:name/:page", mrc721ItemList)
+	registerRuntimeFeatureRoutes(r)
 	// P2P routes
 	RegisterP2PRoutes(r)
 	//btc json api
 	btcJsonApi(r)
-	// mrc20JsonApi(r) // disabled in man-p2p phase 1
 	// metaAccessJsonApi(r)
 	// mrc721JsonApi(r)
 	// if common.ModuleExist("metaso") || common.ModuleExist("metaso_pev") {
@@ -341,6 +333,29 @@ func searchshow(ctx *gin.Context) {
 	// pinMsg.ContentBody = []byte{}
 	// ctx.HTML(200, "home/search.html", gin.H{"Key": ctx.Param("key"), "Data": pinMsg})
 }
+
+func registerRuntimeFeatureRoutes(r *gin.Engine) {
+	registerRuntimeFeatureRoutesForMode(r, p2p.GetConfig().ChainSourceEnabled())
+}
+
+func registerRuntimeFeatureRoutesForMode(r *gin.Engine, chainSourceEnabled bool) {
+	if !chainSourceEnabled || common.Config == nil {
+		return
+	}
+	if man.Mrc20RuntimeEnabled() {
+		r.GET("/mrc20/info/:id", mrc20Info)
+		r.GET("/mrc20/holders/:id/:page", mrc20Holders)
+		r.GET("/mrc20/history/:id/:page", mrc20History)
+		r.GET("/mrc20/address/:id/:address/:page", mrc20AddressHistory)
+		r.GET("/mrc20/:page", mrc20List)
+		mrc20JsonApi(r)
+	}
+	if common.ModuleExist("mrc721") {
+		r.GET("/mrc721/:page", mrc721List)
+		r.GET("/mrc721/item/list/:name/:page", mrc721ItemList)
+	}
+}
+
 func content(ctx *gin.Context) {
 	// //p, err := man.DbAdapter.GetPinByNumberOrId(ctx.Param("number"))
 	var p pin.PinInscription

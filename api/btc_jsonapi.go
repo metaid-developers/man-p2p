@@ -101,7 +101,7 @@ func pinList(ctx *gin.Context) {
 		}
 		msg = append(msg, pmsg)
 	}
-	sortParams := parseSortParams(ctx, "timestamp")
+	sortParams := parseSortParams(ctx, "seenTime")
 	sortPinMsgList(msg, sortParams)
 	count := man.PebbleStore.GetAllCount()
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"Pins": msg, "Count": &count, "Active": "index", "LastId": lastId}))
@@ -137,7 +137,7 @@ func mempoolList(ctx *gin.Context) {
 		}
 		msg = append(msg, pmsg)
 	}
-	sortParams := parseSortParams(ctx, "timestamp")
+	sortParams := parseSortParams(ctx, "seenTime")
 	sortPinMsgList(msg, sortParams)
 	count := man.PebbleStore.GetAllCount()
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"Pins": msg, "Count": &count, "Active": "mempool"}))
@@ -235,7 +235,7 @@ func getPinListByAddress(ctx *gin.Context) {
 		pinNode.PopLv, _ = pin.PopLevelCount(pinNode.ChainName, pinNode.Pop)
 		fixPinList = append(fixPinList, pinNode)
 	}
-	sortParams := parseSortParams(ctx, "timestamp")
+	sortParams := parseSortParams(ctx, "seenTime")
 	sortPinInscriptionList(fixPinList, sortParams)
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": fixPinList, "total": total, "nextCursor": nextCursor}))
 }
@@ -299,7 +299,7 @@ func getAllPinByPath(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrNoPinFound)
 		return
 	}
-	sortParams := parseSortParams(ctx, "timestamp")
+	sortParams := parseSortParams(ctx, "seenTime")
 	sortPinInscriptionList(pinList1, sortParams)
 	// Return list, total count, and next page cursor
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": pinList1, "total": total, "nextCursor": nextCursor}))
@@ -356,7 +356,7 @@ func getAllPinByPathAndMetaId(ctx *gin.Context) {
 		pinNode.PopLv, _ = pin.PopLevelCount(pinNode.ChainName, pinNode.Pop)
 		fixPinList = append(fixPinList, pinNode)
 	}
-	sortParams := parseSortParams(ctx, "timestamp")
+	sortParams := parseSortParams(ctx, "seenTime")
 	sortPinInscriptionList(fixPinList, sortParams)
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": fixPinList, "total": total, "nextCursor": nextCursor}))
 }

@@ -12,7 +12,8 @@ import (
 const (
 	ProtocolID string = "746573746964" //testid(HEX16)
 	//ProtocolID    string = "6d6574616964" //metaid
-	CompliantPath string = "info;file;protocols;nft;ft;mrc20;follow;metaaccess;metaname"
+	CompliantPath         string = "info;file;protocols;nft;ft;mrc20;follow;metaaccess;metaname"
+	LegacyMempoolSortTime int64  = 4096715623
 )
 
 var AllCreatorAddress sync.Map
@@ -251,6 +252,18 @@ type NotifcationData struct {
 
 func GetPublicKeyStr(blockTime int64, chainName string, height int64) string {
 	return common.ConcatBytesOptimized([]string{fmt.Sprintf("%010d", blockTime), "&", chainName, "&", fmt.Sprintf("%010d", height)}, "")
+}
+func SortTime(seenTime int64, timestamp int64) int64 {
+	if seenTime > 0 {
+		return seenTime
+	}
+	return timestamp
+}
+func EffectiveSortTime(p *PinInscription) int64 {
+	if p == nil {
+		return 0
+	}
+	return SortTime(p.SeenTime, p.Timestamp)
 }
 func GenPinSortKey(p *PinInscription, blockTime int64, chainName string, height int64) string {
 	publicKeyStr := GetPublicKeyStr(blockTime, chainName, height)

@@ -7,9 +7,45 @@ CONTAINER="man-indexer-v2"
 LOCAL_BIN="manindexer-linux-amd64"
 REMOTE_TMP="/tmp/${LOCAL_BIN}"
 HEALTH_URL="http://127.0.0.1:7777/debug/count"
+DARWIN_LINUX_AMD64_CC="${DARWIN_LINUX_AMD64_CC:-x86_64-unknown-linux-gnu-gcc}"
+DARWIN_LINUX_AMD64_CXX="${DARWIN_LINUX_AMD64_CXX:-x86_64-unknown-linux-gnu-g++}"
+DARWIN_LINUX_AMD64_CGO_LDFLAGS="${DARWIN_LINUX_AMD64_CGO_LDFLAGS:--L/usr/local/x86_64-linux/lib -lzmq}"
+
+verify_zmq_support() {
+	local file="$1"
+	if ! command -v strings >/dev/null 2>&1; then
+		echo "[build] strings command is required to verify zmq support"
+		exit 1
+	fi
+	if strings "$file" | grep -q 'zmq_stub.go'; then
+		echo "[build] refusing to deploy a stub-only binary: found zmq_stub.go in $file"
+		exit 1
+	fi
+	if ! strings "$file" | grep -q 'github.com/pebbe/zmq4'; then
+		echo "[build] refusing to deploy binary without zmq support: github.com/pebbe/zmq4 not found in $file"
+		exit 1
+	fi
+}
+
+build_binary() {
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		GOOS=linux GOARCH=amd64 \
+		CC="$DARWIN_LINUX_AMD64_CC" \
+		CXX="$DARWIN_LINUX_AMD64_CXX" \
+		CGO_LDFLAGS="$DARWIN_LINUX_AMD64_CGO_LDFLAGS" \
+		CGO_ENABLED=1 \
+		go build -trimpath -ldflags="-s -w" -o "$LOCAL_BIN" .
+		return
+	fi
+
+	GOOS=linux GOARCH=amd64 \
+	CGO_ENABLED=1 \
+	go build -trimpath -ldflags="-s -w" -o "$LOCAL_BIN" .
+}
 
 echo "[1/6] build binary"
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "$LOCAL_BIN" app.go
+build_binary
+verify_zmq_support "$LOCAL_BIN"
 
 echo "[2/6] local checksum"
 sha256sum "$LOCAL_BIN"

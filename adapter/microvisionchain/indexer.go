@@ -10,6 +10,7 @@ import (
 	"man-p2p/pin"
 	"strconv"
 	"strings"
+	"time"
 
 	btcdChaincfg "github.com/btcsuite/btcd/chaincfg"
 
@@ -214,7 +215,20 @@ func (indexer *Indexer) CatchPins(blockHeight int64) (pinInscriptions *[]*pin.Pi
 	return
 }
 func (indexer *Indexer) CatchMempoolPins(txList []interface{}) (pinInscriptions []*pin.PinInscription, txInList []string) {
-	//TODO
+	timestamp := time.Now().Unix()
+	blockHash := ""
+	merkleRoot := ""
+	for i, item := range txList {
+		tx := item.(*wire.MsgTx)
+		for _, in := range tx.TxIn {
+			id := fmt.Sprintf("%s:%d", in.PreviousOutPoint.Hash.String(), in.PreviousOutPoint.Index)
+			txInList = append(txInList, id)
+		}
+		txPins := indexer.CatchPinsByTx(tx, -1, timestamp, blockHash, merkleRoot, i)
+		if len(txPins) > 0 {
+			pinInscriptions = append(pinInscriptions, txPins...)
+		}
+	}
 	return
 }
 func (indexer *Indexer) CatchTransfer(idMap map[string]string) (trasferMap map[string]*pin.PinTransferInfo) {

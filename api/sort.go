@@ -54,6 +54,20 @@ func lessDecimal(a, b decimal.Decimal, desc bool) bool {
 	return cmp < 0
 }
 
+func pinMsgSortTime(item *pin.PinMsg) int64 {
+	if item == nil {
+		return 0
+	}
+	return pin.SortTime(item.SeenTime, item.Timestamp)
+}
+
+func pinInscriptionSortTime(item *pin.PinInscription) int64 {
+	if item == nil {
+		return 0
+	}
+	return pin.SortTime(item.SeenTime, item.Timestamp)
+}
+
 func sortPinMsgList(list []*pin.PinMsg, params sortParams) {
 	if len(list) < 2 {
 		return
@@ -63,6 +77,10 @@ func sortPinMsgList(list []*pin.PinMsg, params sortParams) {
 		by = "timestamp"
 	}
 	switch by {
+	case "seentime":
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessInt64(pinMsgSortTime(list[i]), pinMsgSortTime(list[j]), params.Desc)
+		})
 	case "time", "timestamp":
 		sort.SliceStable(list, func(i, j int) bool {
 			var a, b int64
@@ -152,6 +170,10 @@ func sortPinInscriptionList(list []*pin.PinInscription, params sortParams) {
 		by = "timestamp"
 	}
 	switch by {
+	case "seentime":
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessInt64(pinInscriptionSortTime(list[i]), pinInscriptionSortTime(list[j]), params.Desc)
+		})
 	case "time", "timestamp":
 		sort.SliceStable(list, func(i, j int) bool {
 			var a, b int64

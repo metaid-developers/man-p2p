@@ -223,7 +223,7 @@ func IndexerRun(test string) {
 
 // Mrc20CatchUpRun MRC20 补索引：处理从 mrc20Height 到当前主索引高度之间的区块
 func Mrc20CatchUpRun() {
-	if !isModuleEnabled("mrc20") {
+	if !Mrc20RuntimeEnabled() {
 		return
 	}
 
@@ -413,7 +413,7 @@ func DeleteMempoolData(bestHeight int64, chainName string) {
 		pathList = nil
 	}()
 
-	blockTime := int64(4096715623)
+	blockTime := pin.LegacyMempoolSortTime
 	publicKeyStr := common.ConcatBytesOptimized([]string{fmt.Sprintf("%010d", blockTime), "&", chainName, "&", fmt.Sprintf("%010d", -1)}, "")
 
 	// 遍历PIN数据，生成需要删除的key
@@ -428,10 +428,16 @@ func DeleteMempoolData(bestHeight int64, chainName string) {
 		}
 
 		pinIdList = append(pinIdList, pinId)
-		addressKey := pin.GenAddressSortKey(&p, blockTime, chainName, -1)
-		addressList = append(addressList, addressKey)
-		pathKey := pin.GenPathSortKey(&p, blockTime, chainName, -1)
-		pathList = append(pathList, pathKey)
+		sortTime := pin.EffectiveSortTime(&p)
+		if sortTime == 0 {
+			sortTime = blockTime
+		}
+		addressList = append(addressList, pin.GenAddressSortKey(&p, sortTime, chainName, -1))
+		pathList = append(pathList, pin.GenPathSortKey(&p, sortTime, chainName, -1))
+		if sortTime != blockTime {
+			addressList = append(addressList, pin.GenAddressSortKey(&p, blockTime, chainName, -1))
+			pathList = append(pathList, pin.GenPathSortKey(&p, blockTime, chainName, -1))
+		}
 	}
 
 	// 批量删除mempool数据

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"man-p2p/common"
 	"man-p2p/pin"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -105,7 +106,7 @@ func (db *Database) SetAllPins(height int64, pinList []*pin.PinInscription, batc
 	chainName := first.ChainName
 	blockTime := first.Timestamp
 	if height == -1 {
-		blockTime = 4096715623 // 固定时间，用于metaid导入
+		blockTime = pin.LegacyMempoolSortTime
 	}
 	//blockTime_chainName_height_pinId
 	publicKeyStr := pin.GetPublicKeyStr(blockTime, chainName, height)
@@ -129,20 +130,24 @@ func (db *Database) SetAllPins(height int64, pinList []*pin.PinInscription, batc
 			}
 			list = append(list, *p)
 			keys = append(keys, p.Id)
+			sortTime := pin.EffectiveSortTime(p)
+			if sortTime == 0 {
+				sortTime = blockTime
+			}
 			if height > -1 {
 				//sortKey := common.ConcatBytesOptimized([]string{publicKeyStr, "&", p.Path, "&", p.MetaId, "&", p.Id}, "")
-				sortKey := pin.GenPinSortKey(p, blockTime, chainName, height)
+				sortKey := pin.GenPinSortKey(p, sortTime, chainName, height)
 				pinSortkeys = append(pinSortkeys, sortKey)
 			}
 			if p.Path != "" {
 				//key是 path_blockTime_chainName_height_pinId
 				//k := common.ConcatBytesOptimized([]string{common.GetMetaIdByAddress(p.Path), "&", publicKeyStr, "&", p.Id}, "")
-				k := pin.GenPathSortKey(p, blockTime, chainName, height)
+				k := pin.GenPathSortKey(p, sortTime, chainName, height)
 				pathList = append(pathList, k)
 			}
 			if p.MetaId != "" {
 				//key是metaid_path_blockTime_chainName_height_pinId
-				k := pin.GenAddressSortKey(p, blockTime, chainName, height)
+				k := pin.GenAddressSortKey(p, sortTime, chainName, height)
 				addressList = append(addressList, k)
 			}
 		}
@@ -215,16 +220,7 @@ func (db *Database) GetMempoolPageList(page int64, size int64) ([]*pin.PinInscri
 	}
 	defer iter.Close()
 
-	skip := page * size
-	count := int64(0)
-	for iter.Last(); iter.Valid(); iter.Prev() {
-		if skip > 0 {
-			skip--
-			continue
-		}
-		if count >= size {
-			break
-		}
+	for iter.First(); iter.Valid(); iter.Next() {
 		key := string(iter.Key())
 
 		data, err := db.GetPinByKey(key)
@@ -237,9 +233,26 @@ func (db *Database) GetMempoolPageList(page int64, size int64) ([]*pin.PinInscri
 			continue
 		}
 		result = append(result, &pinNode)
-		count++
 	}
-	return result, nil
+
+	sort.SliceStable(result, func(i, j int) bool {
+		a := pin.EffectiveSortTime(result[i])
+		b := pin.EffectiveSortTime(result[j])
+		if a == b {
+			return result[i].Id > result[j].Id
+		}
+		return a > b
+	})
+
+	start := int(page * size)
+	if start >= len(result) {
+		return []*pin.PinInscription{}, nil
+	}
+	end := start + int(size)
+	if end > len(result) {
+		end = len(result)
+	}
+	return result[start:end], nil
 }
 func (db *Database) GetMempool(key string) ([]byte, error) {
 	result, closer, err := db.PinsMempoolDb.Get([]byte(key))

@@ -17,6 +17,9 @@ DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist}"
 BUILD_OUTPUT="${BUILD_OUTPUT:-${DIST_DIR}/manindexer-${GOOS_TARGET}-${GOARCH_TARGET}}"
 REMOTE_TMP="/tmp/manindexer.${GOOS_TARGET}.${GOARCH_TARGET}.$$"
 SKIP_PUBLIC_CHECK="${SKIP_PUBLIC_CHECK:-0}"
+DARWIN_LINUX_AMD64_CC="${DARWIN_LINUX_AMD64_CC:-x86_64-unknown-linux-gnu-gcc}"
+DARWIN_LINUX_AMD64_CXX="${DARWIN_LINUX_AMD64_CXX:-x86_64-unknown-linux-gnu-g++}"
+DARWIN_LINUX_AMD64_CGO_LDFLAGS="${DARWIN_LINUX_AMD64_CGO_LDFLAGS:--L/usr/local/x86_64-linux/lib -lzmq}"
 
 sha256_file() {
   local file="$1"
@@ -27,14 +30,46 @@ sha256_file() {
   fi
 }
 
+verify_zmq_support() {
+  local file="$1"
+  if ! command -v strings >/dev/null 2>&1; then
+    echo "[deploy] strings command is required to verify zmq support"
+    exit 1
+  fi
+  if strings "$file" | grep -q 'zmq_stub.go'; then
+    echo "[deploy] refusing to deploy a stub-only binary: found zmq_stub.go in $file"
+    exit 1
+  fi
+  if ! strings "$file" | grep -q 'github.com/pebbe/zmq4'; then
+    echo "[deploy] refusing to deploy binary without zmq support: github.com/pebbe/zmq4 not found in $file"
+    exit 1
+  fi
+}
+
+build_binary() {
+  if [[ "$(uname -s)" == "Darwin" && "$GOOS_TARGET" == "linux" && "$GOARCH_TARGET" == "amd64" ]]; then
+    GOOS="$GOOS_TARGET" GOARCH="$GOARCH_TARGET" \
+    CC="$DARWIN_LINUX_AMD64_CC" \
+    CXX="$DARWIN_LINUX_AMD64_CXX" \
+    CGO_LDFLAGS="$DARWIN_LINUX_AMD64_CGO_LDFLAGS" \
+    CGO_ENABLED=1 \
+    go build -trimpath -ldflags="-s -w" -o "$BUILD_OUTPUT" .
+    return
+  fi
+
+  GOOS="$GOOS_TARGET" GOARCH="$GOARCH_TARGET" \
+  CGO_ENABLED=1 \
+  go build -trimpath -ldflags="-s -w" -o "$BUILD_OUTPUT" .
+}
+
 printf '[deploy] repo: %s\n' "$REPO_ROOT"
 printf '[deploy] target: %s (%s)\n' "$SERVER" "$REMOTE_DIR"
 
 mkdir -p "$DIST_DIR"
 cd "$REPO_ROOT"
 printf '[deploy] building manindexer (%s/%s)\n' "$GOOS_TARGET" "$GOARCH_TARGET"
-CGO_ENABLED=0 GOOS="$GOOS_TARGET" GOARCH="$GOARCH_TARGET" \
-  go build -trimpath -ldflags="-s -w" -o "$BUILD_OUTPUT" app.go
+build_binary
+verify_zmq_support "$BUILD_OUTPUT"
 
 LOCAL_SHA="$(sha256_file "$BUILD_OUTPUT")"
 printf '[deploy] local sha256: %s\n' "$LOCAL_SHA"
