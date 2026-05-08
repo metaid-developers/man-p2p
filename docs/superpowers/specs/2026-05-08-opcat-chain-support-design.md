@@ -96,10 +96,11 @@ popCutNum = 21
 
 | File | Location | Change |
 |---|---|---|
-| `man/man.go` | `InitRuntime()` switch | Add `case "opcat":` — register Chain + Indexer adapters |
-| `man/man.go` | `getSyncHeight()` fallback | Add `case "opcat": initialHeight = 0` (let config control) |
+| `man/man.go` | `InitRuntime()` switch | Add `case "opcat":` |
+| `man/man.go` | `getSyncHeight()` if/else chain | Add `else if chainName == "opcat" { initialHeight = 0 }` |
 | `man/man.go` | import block | Add `"man-p2p/adapter/opcat"` |
-| `man/indexer_pebble.go` | `handleMrc20()` switch | Add `case "opcat": mrc20Height = common.Config.Opcat.Mrc20Height` |
+| `man/indexer_pebble.go` | `handleMrc20()` switch | Add `case "opcat":` |
+| `pin/pop.go` | `PopLevelCount()` and `RarityScoreBinary()` switch | Add `case "opcat": PopCutNum = common.Config.Opcat.PopCutNum` |
 
 No changes to `Mrc20CatchUpRun()` — opcat is skipped because `mrc20StartHeight <= 0`.
 
@@ -115,7 +116,15 @@ Or multi-chain: `-chain=btc,mvc,doge,opcat`.
 
 - MRC20/MRC721 parsing on OpcatLayer
 - Meltdown transaction detection (PIN transfer tracking still works)
-- Changes to existing BTC/MVC/Doge adapter code
+- Changes to existing BTC/MVC/Doge adapter code (except `pin/pop.go` where Doge is already missing; this spec does NOT fix Doge's omission)
+
+## PopCutNum Values
+
+| Network | BTC | MVC | Doge | Opcat |
+|---|---|---|---|---|
+| mainnet (`test=0`) | 21 | 21 | 21 | 21 |
+| testnet (`test=1`) | 17 | 8 | 17 | 8 |
+| regtest (`test=2`) | 0 | 0 | 0 | 0 |
 
 ## Estimated size
 
