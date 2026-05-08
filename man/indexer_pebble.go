@@ -476,6 +476,8 @@ func (pd *PebbleData) handleMrc20(chainName string, height int64, pinList *[]*pi
 		mrc20Height = common.Config.Mvc.Mrc20Height
 	case "doge":
 		mrc20Height = common.Config.Doge.Mrc20Height
+	case "opcat":
+		mrc20Height = common.Config.Opcat.Mrc20Height
 	default:
 		//log.Printf("[MRC20] Unknown chain: %s", chainName)
 		return

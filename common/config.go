@@ -37,6 +37,7 @@ type AllConfig struct {
 	Btc         btcConfig
 	Mvc         mvcConfig
 	Doge        dogeConfig
+	Opcat       opcatConfig
 	MongoDb     mongoConfig
 	Pebble      pebble
 	Web         webConfig
@@ -104,6 +105,17 @@ type mvcConfig struct {
 	PopCutNum       int    `toml:"popCutNum"`
 }
 type dogeConfig struct {
+	InitialHeight   int64  `toml:"initialHeight"`
+	Mrc20Height     int64  `toml:"mrc20Height"`
+	RpcHost         string `toml:"rpcHost"`
+	RpcUser         string `toml:"rpcUser"`
+	RpcPass         string `toml:"rpcPass"`
+	RpcHTTPPostMode bool   `toml:"rpcHttpPostMode"`
+	RpcDisableTLS   bool   `toml:"rpcDisableTLS"`
+	ZmqHost         string `toml:"zmqHost"`
+	PopCutNum       int    `toml:"popCutNum"`
+}
+type opcatConfig struct {
 	InitialHeight   int64  `toml:"initialHeight"`
 	Mrc20Height     int64  `toml:"mrc20Height"`
 	RpcHost         string `toml:"rpcHost"`
@@ -183,6 +195,16 @@ func InitConfig(filePath string) {
 			Config.Doge.RpcPass = *v
 		case "doge_zmqpubrawtx":
 			Config.Doge.ZmqHost = *v
+		case "opcat_height":
+			Config.Opcat.InitialHeight, _ = strconv.ParseInt(*v, 10, 64)
+		case "opcat_rpc_host":
+			Config.Opcat.RpcHost = *v
+		case "opcat_rpc_user":
+			Config.Opcat.RpcUser = *v
+		case "opcat_rpc_password":
+			Config.Opcat.RpcPass = *v
+		case "opcat_zmqpubrawtx":
+			Config.Opcat.ZmqHost = *v
 		case "server_port":
 			Config.Web.Port = *v
 		case "https_pem_file":
@@ -213,16 +235,19 @@ func InitConfig(filePath string) {
 		Config.Btc.PopCutNum = 17
 		Config.Mvc.PopCutNum = 8
 		Config.Doge.PopCutNum = 17
+		Config.Opcat.PopCutNum = 8
 		Config.ProtocolID = "6d6574616964"
 	case "2":
 		Config.Btc.PopCutNum = 0
 		Config.Mvc.PopCutNum = 0
 		Config.Doge.PopCutNum = 0
+		Config.Opcat.PopCutNum = 0
 		Config.ProtocolID = "6d6574616964"
 	case "0":
 		Config.Btc.PopCutNum = 21
 		Config.Mvc.PopCutNum = 21
 		Config.Doge.PopCutNum = 21
+		Config.Opcat.PopCutNum = 21
 		Config.ProtocolID = "6d6574616964"
 	}
 	// if Config.MetaSo.Prikey == "" || Config.MetaSo.Pubkey == "" {
@@ -257,6 +282,11 @@ func GetFlagConfig() (flagConfig map[string]*string, configFile string) {
 	flagConfig["doge_rpc_user"] = flag.String("doge_rpc_user", "", "doge rpcuser")
 	flagConfig["doge_rpc_password"] = flag.String("doge_rpc_password", "", "doge rpc password")
 	flagConfig["doge_zmqpubrawtx"] = flag.String("doge_zmqpubrawtx", "", "doge zmqpubrawtx")
+	flagConfig["opcat_height"] = flag.String("opcat_height", "", "opcat starting block height")
+	flagConfig["opcat_rpc_host"] = flag.String("opcat_rpc_host", "", "opcat rpc host")
+	flagConfig["opcat_rpc_user"] = flag.String("opcat_rpc_user", "", "opcat rpcuser")
+	flagConfig["opcat_rpc_password"] = flag.String("opcat_rpc_password", "", "opcat rpc password")
+	flagConfig["opcat_zmqpubrawtx"] = flag.String("opcat_zmqpubrawtx", "", "opcat zmqpubrawtx")
 	flagConfig["server_port"] = flag.String("server_port", "", "server port")
 	flagConfig["https_pem_file"] = flag.String("https_pem_file", "", "http pem file")
 	flagConfig["https_key_file"] = flag.String("https_key_file", "", "https key file")

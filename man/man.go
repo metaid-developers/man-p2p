@@ -7,6 +7,7 @@ import (
 	"man-p2p/adapter/bitcoin"
 	"man-p2p/adapter/dogecoin"
 	"man-p2p/adapter/microvisionchain"
+	"man-p2p/adapter/opcat"
 	"man-p2p/common"
 	"man-p2p/pebblestore"
 	"man-p2p/pin"
@@ -114,6 +115,13 @@ func InitRuntime(chainType, dbType, test, server string, enableChain bool) {
 			IndexerAdapter[chain] = &dogecoin.Indexer{
 				ChainParams: ChainParams[chain],
 				PopCutNum:   common.Config.Doge.PopCutNum,
+				ChainName:   chain,
+			}
+		case "opcat":
+			ChainAdapter[chain] = &opcat.OpcatChain{}
+			IndexerAdapter[chain] = &opcat.Indexer{
+				ChainParams: ChainParams[chain],
+				PopCutNum:   common.Config.Opcat.PopCutNum,
 				ChainName:   chain,
 			}
 		}
@@ -325,6 +333,8 @@ func getSyncHeight(chainName string, test string) (from, to int64) {
 			initialHeight = int64(844446)
 		} else if chainName == "doge" {
 			initialHeight = int64(6005462)
+		} else if chainName == "opcat" {
+			initialHeight = int64(0)
 		}
 	}
 	dbLast := make(map[string]int64)
