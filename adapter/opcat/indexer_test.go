@@ -52,3 +52,17 @@ func TestCatchPinsByTxParsesOpcatOpReturnPin(t *testing.T) {
 		t.Fatalf("unexpected content body: %s", string(pins[0].ContentBody))
 	}
 }
+
+func TestGetBase58AddressFromPkScriptInvalidHashReturnsEmpty(t *testing.T) {
+	indexer := &Indexer{}
+	indexer.InitIndexer()
+
+	for _, scriptAddress := range [][]byte{
+		nil,
+		{0x01, 0x02, 0x03},
+	} {
+		if got := GetBase58AddressFromPkScript(scriptAddress, btcNetParams); got != "" {
+			t.Fatalf("expected empty address for invalid script address %x, got %q", scriptAddress, got)
+		}
+	}
+}

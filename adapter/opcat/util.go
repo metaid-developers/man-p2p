@@ -264,7 +264,10 @@ func GetTxNewRawByte(transaction *RawTransaction) []byte {
 }
 
 func GetBase58AddressFromPkScript(pkScript []byte, net *btcdChaincfg.Params) (address string) {
-	btcAddr, _ := btcutil.NewAddressPubKeyHash(pkScript, net)
+	btcAddr, err := btcutil.NewAddressPubKeyHash(pkScript, net)
+	if err != nil || btcAddr == nil {
+		return ""
+	}
 	address = btcAddr.EncodeAddress()
 	return
 }
