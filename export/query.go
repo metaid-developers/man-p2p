@@ -75,21 +75,17 @@ func queryByMetaId(db *pebblestore.Database, metaId string, startHeight, endHeig
 	for it.First(); it.Valid(); it.Next() {
 		key := string(it.Key())
 		parts := strings.Split(key, "&")
-		if len(parts) < 4 {
+		if len(parts) < 6 {
 			continue
 		}
-		segments := strings.Split(parts[2], "_")
-		if len(segments) < 3 {
-			continue
-		}
-		height, err := strconv.ParseInt(segments[2], 10, 64)
+		height, err := strconv.ParseInt(parts[4], 10, 64)
 		if err != nil {
 			continue
 		}
 		if height < startHeight || height > endHeight {
 			continue
 		}
-		pinId := parts[3]
+		pinId := parts[5]
 		if seen[pinId] {
 			continue
 		}
