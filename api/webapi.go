@@ -130,6 +130,8 @@ func Start(f embed.FS) {
 	registerRuntimeFeatureRoutes(r)
 	// P2P routes
 	RegisterP2PRoutes(r)
+	// Export routes
+	RegisterExportRoutes(r)
 	//btc json api
 	btcJsonApi(r)
 	// metaAccessJsonApi(r)
