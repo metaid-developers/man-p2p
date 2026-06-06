@@ -168,7 +168,7 @@ func TestArchiveStructure(t *testing.T) {
 			GenesisHeight: 800000,
 			Timestamp:     1700000000,
 			ContentType:   "text/plain",
-			Content:       "alice",
+			ContentBody:   []byte("alice"),
 		},
 		{
 			Id:            "pin-b",
@@ -178,7 +178,7 @@ func TestArchiveStructure(t *testing.T) {
 			GenesisHeight: 800001,
 			Timestamp:     1700000001,
 			ContentType:   "text/plain",
-			Content:       "bob",
+			ContentBody:   []byte("bob"),
 		},
 	}
 
@@ -271,7 +271,7 @@ func TestExportValidator(t *testing.T) {
 		{
 			name:    "negative start height",
 			req:     &ExportRequest{Identity: "id", IdentityType: "address", StartHeight: -1, EndHeight: 100},
-			wantErr: "start_height and end_height must be positive",
+			wantErr: "start_height must be non-negative and end_height must be positive",
 		},
 		{
 			name:    "start greater than end",
@@ -293,6 +293,19 @@ func TestExportValidator(t *testing.T) {
 	}
 }
 
+func TestExportValidatorAllowsZeroStartHeight(t *testing.T) {
+	req := &ExportRequest{
+		Identity:     "id",
+		IdentityType: "address",
+		StartHeight:  0,
+		EndHeight:    100,
+	}
+
+	if err := validateRequest(req); err != nil {
+		t.Fatalf("expected zero start_height to be allowed, got %v", err)
+	}
+}
+
 func TestContentClassification(t *testing.T) {
 	textPin := &pin.PinInscription{
 		Id:            "text-pin",
@@ -302,7 +315,7 @@ func TestContentClassification(t *testing.T) {
 		GenesisHeight: 800000,
 		Timestamp:     1700000000,
 		ContentType:   "text/plain",
-		Content:       "hello world",
+		ContentBody:   []byte("hello world"),
 	}
 
 	binaryPin := &pin.PinInscription{

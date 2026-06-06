@@ -2,6 +2,7 @@ package export
 
 import (
 	"strings"
+
 	"man-p2p/pin"
 )
 
@@ -74,21 +75,17 @@ func pathToFile(p string) string {
 	return s + ".json"
 }
 
-func isTextContent(contentType string) bool {
-	ct := strings.ToLower(contentType)
-	return strings.HasPrefix(ct, "text/") ||
-		strings.Contains(ct, "charset") ||
-		ct == "application/json" ||
-		ct == "application/javascript"
+func isFileContent(path string) bool {
+	return strings.HasPrefix(path, "/file")
 }
 
 func pinToRecord(p *pin.PinInscription) PinRecord {
 	var content string
 	var contentSummary string
-	if isTextContent(p.ContentType) {
-		content = p.Content
-	} else {
+	if isFileContent(p.Path) {
 		contentSummary = p.ContentSummary
+	} else {
+		content = string(p.ContentBody)
 	}
 	return PinRecord{
 		ID:             p.Id,

@@ -35,7 +35,7 @@ func setupExportEndpoint(t *testing.T) (*pebblestore.Database, *pin.PinInscripti
 		GenesisHeight: 800000,
 		Timestamp:     1700000000,
 		ContentType:   "text/plain",
-		Content:       "hello world",
+		ContentBody:   []byte("hello world"),
 	}
 
 	if err := db.BatchInsertPins([]pin.PinInscription{*p}); err != nil {
