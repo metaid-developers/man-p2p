@@ -16,16 +16,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestExportEndpoint(t *testing.T) {
+func setupExportEndpoint(t *testing.T) (*pebblestore.Database, *pin.PinInscription, string) {
+	t.Helper()
 	db, err := pebblestore.NewDataBase(t.TempDir(), 2)
 	if err != nil {
 		t.Fatalf("NewDataBase error: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-
-	orig := man.PebbleStore
-	man.PebbleStore = &man.PebbleData{Database: db}
-	defer func() { man.PebbleStore = orig }()
 
 	address := "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
 	metaId := common.GetMetaIdByAddress(address)
@@ -51,6 +48,57 @@ func TestExportEndpoint(t *testing.T) {
 		t.Fatalf("BatchSetAddressData error: %v", err)
 	}
 
+	return db, p, address
+}
+
+func checkExportResponse(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/zip" {
+		t.Fatalf("expected Content-Type application/zip, got %q", ct)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader error: %v", err)
+	}
+	var exportFile *zip.File
+	for _, f := range zr.File {
+		if f.Name == "export.json" {
+			exportFile = f
+			break
+		}
+	}
+	if exportFile == nil {
+		t.Fatal("missing export.json in zip archive")
+	}
+	rc, err := exportFile.Open()
+	if err != nil {
+		t.Fatalf("cannot open export.json: %v", err)
+	}
+	defer rc.Close()
+	var result map[string]interface{}
+	if err := json.NewDecoder(rc).Decode(&result); err != nil {
+		t.Fatalf("decode export.json error: %v", err)
+	}
+	totalPins, ok := result["totalPins"].(float64)
+	if !ok {
+		t.Fatalf("totalPins not found or not a number: %#v", result)
+	}
+	if int(totalPins) != 1 {
+		t.Fatalf("expected TotalPins=1, got %v", totalPins)
+	}
+}
+
+func TestExportEndpointPOST(t *testing.T) {
+	db, _, address := setupExportEndpoint(t)
+
+	orig := man.PebbleStore
+	man.PebbleStore = &man.PebbleData{Database: db}
+	defer func() { man.PebbleStore = orig }()
+
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	RegisterExportRoutes(r)
@@ -68,47 +116,23 @@ func TestExportEndpoint(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	checkExportResponse(t, w)
+}
 
-	ct := w.Header().Get("Content-Type")
-	if ct != "application/zip" {
-		t.Fatalf("expected Content-Type application/zip, got %q", ct)
-	}
+func TestExportEndpointGET(t *testing.T) {
+	db, _, address := setupExportEndpoint(t)
 
-	zr, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
-	if err != nil {
-		t.Fatalf("zip.NewReader error: %v", err)
-	}
+	orig := man.PebbleStore
+	man.PebbleStore = &man.PebbleData{Database: db}
+	defer func() { man.PebbleStore = orig }()
 
-	var exportFile *zip.File
-	for _, f := range zr.File {
-		if f.Name == "export.json" {
-			exportFile = f
-			break
-		}
-	}
-	if exportFile == nil {
-		t.Fatal("missing export.json in zip archive")
-	}
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	RegisterExportRoutes(r)
 
-	rc, err := exportFile.Open()
-	if err != nil {
-		t.Fatalf("cannot open export.json: %v", err)
-	}
-	defer rc.Close()
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/export/user-data?identity="+address+"&identity_type=address&start_height=799999&end_height=800001", nil)
+	r.ServeHTTP(w, req)
 
-	var result map[string]interface{}
-	if err := json.NewDecoder(rc).Decode(&result); err != nil {
-		t.Fatalf("decode export.json error: %v", err)
-	}
-
-	totalPins, ok := result["totalPins"].(float64)
-	if !ok {
-		t.Fatalf("totalPins not found or not a number: %#v", result)
-	}
-	if int(totalPins) != 1 {
-		t.Fatalf("expected TotalPins=1, got %v", totalPins)
-	}
+	checkExportResponse(t, w)
 }

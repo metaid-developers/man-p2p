@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"man-p2p/api/respond"
@@ -15,6 +16,30 @@ import (
 
 func RegisterExportRoutes(r *gin.Engine) {
 	r.POST("/api/export/user-data", exportUserData)
+	r.GET("/api/export/user-data", exportUserDataGET)
+}
+
+func exportUserDataGET(ctx *gin.Context) {
+	var req export.ExportRequest
+	req.Identity = ctx.Query("identity")
+	req.IdentityType = ctx.Query("identity_type")
+	if h := ctx.Query("start_height"); h != "" {
+		v, err := strconv.ParseInt(h, 10, 64)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, respond.ApiError(400, "invalid start_height: "+err.Error()))
+			return
+		}
+		req.StartHeight = v
+	}
+	if h := ctx.Query("end_height"); h != "" {
+		v, err := strconv.ParseInt(h, 10, 64)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, respond.ApiError(400, "invalid end_height: "+err.Error()))
+			return
+		}
+		req.EndHeight = v
+	}
+	exportUserDataStream(ctx, &req)
 }
 
 func exportUserData(ctx *gin.Context) {
@@ -23,13 +48,17 @@ func exportUserData(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, respond.ApiError(400, "invalid request: "+err.Error()))
 		return
 	}
+	exportUserDataStream(ctx, &req)
+}
+
+func exportUserDataStream(ctx *gin.Context, req *export.ExportRequest) {
 
 	pr, pw := io.Pipe()
 	defer pr.Close()
 
 	go func() {
 		defer pw.Close()
-		err := export.ExportUserData(pw, &req)
+		err := export.ExportUserData(pw, req)
 		pw.CloseWithError(err)
 	}()
 
