@@ -33,8 +33,8 @@ func validateRequest(req *ExportRequest) error {
 	if req.IdentityType != "global_meta_id" && req.IdentityType != "address" {
 		return fmt.Errorf("identity_type must be 'global_meta_id' or 'address'")
 	}
-	if req.StartHeight <= 0 || req.EndHeight <= 0 {
-		return fmt.Errorf("start_height and end_height must be positive")
+	if req.StartHeight < 0 || req.EndHeight <= 0 {
+		return fmt.Errorf("start_height must be non-negative and end_height must be positive")
 	}
 	if req.StartHeight > req.EndHeight {
 		return fmt.Errorf("start_height must not exceed end_height")
