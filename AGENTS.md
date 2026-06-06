@@ -1,153 +1,160 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
-
 ## Start Here
 
-Read in this order:
+1. This file
+2. `localdocs/README.md` (local-only context, baselines, pitfalls)
+3. `docs/superpowers/` (P2P specs) when task ties to IDBots integration
 
-1. This `AGENTS.md`
-2. `localdocs/README.md` if it exists locally
-3. Relevant specs/plans under `docs/superpowers/` when the task is tied to the current IDBots P2P integration
+Durable guidance lives here; fast-changing session context goes in `localdocs/`.
 
-Keep `AGENTS.md` stable and durable. Put fast-changing local context, current baselines, recent pitfalls, and new-session prompts in `localdocs/`.
+## Project Identity
 
-## Project Overview
+This repo started as **man-indexer-v2** and now serves as **man-p2p**, the local-first MetaID indexer + libp2p runtime embedded by IDBots. `main` is the only long-lived branch.
 
-This repository started as **man-indexer-v2** and now also serves as **man-p2p**, the local-first MetaID indexer + P2P runtime embedded by IDBots.
-
-Current practical role:
-- expose the local HTTP API consumed by IDBots
-- run a libp2p node for peer discovery / pin sync
-- preserve fallback compatibility when no peers are available
-
-The current Alpha baseline is the local-first P2P integration used by IDBots `v0.1.100` on March 23, 2026. In this phase, P2P-backed PIN sync is the focus; chain-source indexing remains optional, and MRC20 catch-up is intentionally disabled in the P2P-first runtime path.
-
-## Build & Run Commands
+## Build & Run
 
 ```bash
-# Build all release binaries
-make all
-
-# Focused P2P test suite
-make test
-
-# Alpha acceptance suite used during IDBots integration
-make alpha-test
-
-# Run the current app entrypoint with local p2p config
-go run . -config ./config.toml -server=1 -p2p-config ./p2p-config.json -data-dir ./man_p2p_data
-
-# Run a specific package/test directly
+make all                          # cross-compile release binaries (CGO_ENABLED=0)
+make test                         # CGO_ENABLED=0 go test ./p2p/... -v -count=1
+make alpha-test                   # focused acceptance: p2p + api + man package tests
+make cgo-api-smoke                # macOS cgo-backed smoke test (uses CGO_ENV_WRAPPER)
+CGO_ENABLED=0 go run . -config ./config.toml -server=1 -p2p-config ./p2p-config.json -data-dir ./man_p2p_data
 CGO_ENABLED=0 go test ./p2p -run TestLoadConfig -v -count=1
-
-# Run a macOS cgo-backed smoke test through the repo wrapper
-make cgo-api-smoke
-
-# Regenerate Swagger docs
-swag init -g app.go
+swag init -g app.go               # regenerate Swagger docs
+make run-local-mvc                # shortcut: go run . -chain mvc -config ./config.toml -server=1 ...
 ```
 
-**Note**:
-- Current release binaries are built with `CGO_ENABLED=0` via `Makefile`.
-- Some legacy indexer paths still depend on ZMQ / chain adapters; do not assume every package is exercised by the P2P alpha test suite.
-- When the task is about IDBots integration, validate the binary contract in this repo first, then sync into IDBots and verify there.
-- If plain macOS cgo commands hit `github.com/DataDog/zstd` header errors from `/usr/local/include`, use `./tools/with-macos-cgo-env.sh ...` or the `make cgo-*` wrapper targets instead of swapping compression implementations.
+Release binaries are built with `CGO_ENABLED=0`. The `p2p/` package does not require CGO; legacy indexer paths do (ZMQ via `github.com/pebbe/zmq4`). Do not assume every package is exercised by the `p2p/` test suite.
+
+On macOS, if cgo commands hit `github.com/DataDog/zstd` header errors from `/usr/local/include`, use `./tools/with-macos-cgo-env.sh ...` or `make cgo-*` wrappers.
 
 ## Architecture
 
-### Adapter Pattern (multi-chain abstraction)
+Dual entrypoint in `app.go`:
+1. P2P-first path: init config → load JSON p2p config → `p2p.InitHost/Gossip/Presence/SyncHandler` → optionally start Gin API
+2. Chain-source indexing path: legacy adapter init + ZMQ loop + 10s `IndexerRun` tick
 
-Two core interfaces in `adapter/`:
-- **`Chain`**: Block/transaction retrieval (`GetBlock`, `GetTransaction`, `GetBestHeight`, etc.)
-- **`Indexer`**: PIN parsing and transfer detection (`CatchPins`, `CatchTransfer`, `CatchNativeMrc20Transfer`, `ZmqRun`, etc.)
+Two adapter interfaces in `adapter/`:
+- **`Chain`**: block/tx retrieval per blockchain
+- **`Indexer`**: PIN parsing & transfer detection per chain
 
-Each chain has its own implementation under `adapter/{bitcoin,dogecoin,microvisionchain}/`. Chain-specific inscription parsing differs significantly:
-- Bitcoin: SegWit Witness data (P2WSH/Taproot)
-- Dogecoin: P2SH ScriptSig extraction
-- MVC: Custom inscription format
+Inscription parsing differs per chain (BTC: SegWit witness, DOGE: P2SH ScriptSig, MVC: custom format). See `adapter/{bitcoin,dogecoin,microvisionchain}/`.
 
-### Main Loop (`app.go`)
+Wiring from p2p callbacks to core indexer: `p2p_wiring.go` → `man.IngestP2PPin()`.
 
-`main()` now initializes runtime config, optionally loads the P2P JSON config, starts the libp2p host/gossip/storage monitor, and conditionally enables the legacy chain adapters. IDBots currently relies on the local HTTP API and P2P host even when chain-source indexing is disabled.
+### Package Notes
 
-### Core Packages
+| Package | Non-obvious facts |
+|---------|-------------------|
+| `main` (root) | `app.go` entrypoint, `app_runtime.go` guards MRC20 behind chainSource, `p2p_wiring.go` bridges p2p → man callbacks |
+| `p2p/` | 18 files: `host.go`, `gossip.go`, `sync.go`, `presence.go`, `config.go`, `relay.go`, `storage.go`, `subscription.go`. `presence.go` is the largest (681 lines). |
+| `pebblestore/` | 16-shard partitioning for PINs, plus specialized DBs for blocks, counters, MRC20, mempool, metaid info, etc. |
+| `api/` | Gin HTTP server — endpoints consumed by IDBots for health, status, peers, config reload |
+| `web/` | Embedded via `//go:embed web/static/* web/template/* ...` |
+| `mrc20/` | Data structures + status constants (separated from `man/`) |
 
-| Package | Role |
-|---------|------|
-| `man/` | Core indexer logic: PIN processing, MRC20 handling (deploy/mint/transfer/teleport), meltdown |
-| `mrc20/` | Data structures, constants, status codes for MRC20 protocol |
-| `pin/` | PIN inscription data structures and status constants |
-| `pebblestore/` | PebbleDB storage layer with 16-shard partitioning for PINs |
-| `api/` | Gin HTTP server, REST endpoints, Swagger docs, HTML templates |
-| `common/` | Config parsing (TOML), CLI flags, shared utilities |
-| `adapter/` | Chain/Indexer interfaces and per-chain implementations |
-| `p2p/` | Runtime config, libp2p host/bootstrap/relay, gossip, sync handlers, storage guardrails |
-| `web/` | Embedded static assets and HTML templates (`//go:embed`) |
+## IDBots Integration Workflow
 
-## IDBots Integration Notes
+1. Change `man-p2p` → run focused Go tests here → build target binary
+2. In IDBots repo: `npm run sync:man-p2p` (copies platform binary)
+3. Validate in `npm run electron:dev`, then again in the packaged `.app` bundle
+4. For macOS packaged testing, launch `IDBots.app` normally (not `Contents/MacOS/IDBots` directly — it reproduces networking differently)
 
-- IDBots embeds platform binaries from this repo under `resources/man-p2p/`.
-- After changing runtime behavior that affects the bundled binary contract, rebuild the target binary here and then run `npm run sync:man-p2p` in the IDBots repo.
-- Development flow is usually:
-  1. change `man-p2p`
-  2. run focused Go tests here
-  3. build/sync the binary into IDBots
-  4. validate in IDBots dev runtime
-  5. validate again in packaged app builds for release/acceptance
-- Packaged macOS app testing should launch `IDBots.app` normally, not `IDBots.app/Contents/MacOS/IDBots` directly.
+## Gotchas
 
-### MRC20 Token Protocol
-
-MRC20 is a UTXO-based token protocol with operations: **deploy**, **mint**, **transfer** (native/data/teleport). Key files:
-- `man/mrc20.go` — Main handler: `Mrc20Handle()`, arrival/teleport processing
-- `man/mrc20_new_methods.go` — Balance management, transaction history
-- `man/mrc20_pebble.go` — DB storage for MRC20 UTXOs, arrivals, teleports
-- `man/mrc20_validator.go` — Validation logic (deploy, mint, transfer rules)
-
-**UTXO status flow**: Available(0) → TeleportPending(1) or TransferPending(2) → Spent(-1)
-
-### Teleport (Cross-Chain Transfer)
-
-Bilateral verification system for moving MRC20 assets between chains:
-1. **Target chain**: User creates `/ft/mrc20/arrival` PIN declaring `assetOutpoint`
-2. **Source chain**: User creates `/ft/mrc20/transfer` PIN with `type=teleport`, `coord=arrival_pin_id`
-3. Both sides confirmed → source UTXO marked spent, new UTXO created on target chain
-4. Failed teleport → `handleFailedTeleportInputs()` returns assets to sender
-
-Arrival status: Pending(0) → Completed(1) / Invalid(2). Either side can arrive first; pending queue handles coordination.
-
-### PIN Meltdown
-
-Consolidates ≥3 PIN UTXOs (546 sats each) into one transaction. Status: `PinStatusMeltdown = -2`. See `DOC_MELTDOWN.md`.
-
-### Storage (PebbleDB)
-
-Key-value store with prefix-based namespacing. Sharded across 16 databases for PIN data. Specialized DBs for blocks, counters, paths, addresses, MRC20, mempool, etc. Batch operations ensure atomicity.
-
-## Configuration
-
-TOML config files (`config.toml`, `config_regtest.toml`, etc.) with sections:
-- Chain RPC endpoints: `[btc]`, `[mvc]`, `[doge]`
-- Sync modes: `[sync]` (fullNode, mrc20Only)
-- Database: `[pebble]` (shard count)
-- CLI flags: `-chain`, `-test` (0=mainnet, 1=testnet, 2=regtest), `-config`, `-server`
+- **Peerless is healthy**: `0 peers` is acceptable in current Alpha. Don't treat it as offline.
+- **mDNS log**: `mdns: skipped (zeroconf dependency not available)` is expected. Not a blocker.
+- **CGO_ENABLED=0**: Always use for normal builds and P2P tests. Only cgo-backed smoke tests need CGO.
+- **.gitignore excludes**: `config.toml`, `p2p-config.json`, `localdocs/`, `*.local.toml`, `*.local.json` — create your own from the `.example.*` files.
 
 ## Conventions
 
-- **Arithmetic**: Use `github.com/shopspring/decimal` for all token amounts — never float
-- **Concurrency**: `sync.Map` for shared maps (e.g., `AllCreatorAddress`), `sync.Mutex` for caches
-- **Error handling**: Early return `if err != nil { return err }` — no custom error types
-- **Logging**: Standard `log` package with `[DEBUG]` prefix for dev context
-- **MRC20 errors**: Predefined error message constants in `mrc20/mrc20.go` (e.g., `ErrDeployContent`, `ErrMintLimit`)
-- **JSON**: Uses `github.com/bytedance/sonic` for high-performance serialization
+- **Arithmetic**: `github.com/shopspring/decimal` for all token amounts — never float
+- **JSON**: `github.com/bytedance/sonic`
+- **Concurrency**: `sync.Map` for shared maps, `sync.Mutex` for caches
+- **Error handling**: `if err != nil { return err }` — no custom error types
+- **Logging**: standard `log` with `[DEBUG]` prefix
 
-## Key Documentation
+## Commit and Merge Rules
 
-- `TELEPORT_SPEC.md` — Cross-chain teleport specification
-- `MRC20_IMPLEMENTATION.md` — MRC20 protocol details
-- `MRC20_INDEXING_DESIGN.md` — Indexing architecture
-- `DOC_MELTDOWN.md` — PIN meltdown mechanics
-- `DOGECOIN_ADAPTER.md` — Dogecoin-specific implementation
-- `docs/DEPLOY_SOP.md` — deployment / health-check SOP
-- `docs/superpowers/specs/` — current P2P design docs used during the IDBots alpha work
+- If you notice unfamiliar or unrelated file changes, continue working and stay focused on your own scoped edits unless the user asks you to inspect them.
+- For each completed round that modifies existing code/docs or adds new code/docs, automatically stage and commit only the files you changed and understand.
+- For deletion changes, wait until the user explicitly says "commit" before staging and committing those deletions.
+- Prefer small, frequent commits. Commit each independent, verifiable unit of work as soon as it is complete.
+- For every modification or newly added feature, create one commit.
+- For every commit, use the `metabot-post-buzz` skill with the Lisa Hahn identity (slug: `lisa-hahn`) to post a detailed development-journal entry on-chain describing the change.
+- Use commit messages in the format `<type>: <short description>`, where `<type>` is one of `feat`, `fix`, `refactor`, `docs`, or `chore`.
+- Before committing, make sure the relevant local tests or verification steps pass for your changes.
+- When merging completed work into `main`, use `git merge --no-ff` to preserve the feature merge point.
+
+## Behavioral Guidelines
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+### 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+### 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+### 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+### 5. No Guessing, No Drive-By Fixes
+
+**Verify boundaries before acting. Don't fix bugs you didn't create.**
+
+- Never guess. When writing a plan or code, if anything is unclear or any scope boundary is ambiguous, either read the relevant code or discuss with the user — keep going until every boundary is clear.
+- Don't opportunistically fix pre-existing bugs that fall outside the current task. Surface them to the user and let them decide; never silently change behavior you weren't asked to change.
+
+## Reference Docs Worth Reading
+
+`TELEPORT_SPEC.md` `MRC20_IMPLEMENTATION.md` `MRC20_INDEXING_DESIGN.md` `DOC_MELTDOWN.md` `DOGECOIN_ADAPTER.md` `docs/DEPLOY_SOP.md`
