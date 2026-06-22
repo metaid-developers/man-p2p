@@ -109,3 +109,29 @@ func TestSyncExistingMempoolReturnsFetchError(t *testing.T) {
 		t.Fatalf("expected indexer not to be called on fetch error, got %d", indexer.calls)
 	}
 }
+
+func TestMempoolPinAlreadyKnownChecksPendingAndConfirmedStores(t *testing.T) {
+	oldStore := PebbleStore
+	PebbleStore = newTestPebbleData(t)
+	t.Cleanup(func() {
+		PebbleStore = oldStore
+	})
+
+	if mempoolPinAlreadyKnown("missing-pin") {
+		t.Fatal("missing pin should not be treated as already known")
+	}
+
+	if err := PebbleStore.Database.SetMempool(&pin.PinInscription{Id: "pending-pin"}); err != nil {
+		t.Fatalf("SetMempool error: %v", err)
+	}
+	if !mempoolPinAlreadyKnown("pending-pin") {
+		t.Fatal("pending mempool pin should be treated as already known")
+	}
+
+	if err := PebbleStore.Database.BatchInsertPins([]pin.PinInscription{{Id: "confirmed-pin"}}); err != nil {
+		t.Fatalf("BatchInsertPins error: %v", err)
+	}
+	if !mempoolPinAlreadyKnown("confirmed-pin") {
+		t.Fatal("confirmed pin should be treated as already known")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"man-p2p/pin"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/cockroachdb/pebble"
@@ -37,6 +38,8 @@ var (
 	ChainList      []string // 保持链的顺序
 	mempoolTaskSem chan struct{}
 )
+
+const mempoolResyncInterval = 30 * time.Second
 
 func runMempoolTask(task func()) {
 	if mempoolTaskSem == nil {
@@ -153,11 +156,25 @@ func ZmqRun() {
 func doZmqRun(chain string, indexer adapter.Indexer) {
 	msg := make(chan pin.MempollChanMsg, 64)
 	go indexer.ZmqRun(msg)
-	if err := syncExistingMempool(chain, ChainAdapter[chain], indexer, processMempoolPin); err != nil {
+	if err := syncExistingMempool(chain, ChainAdapter[chain], indexer, processMempoolPinIfMissing); err != nil {
 		log.Printf("[WARN] startup mempool sync failed for %s: %v", chain, err)
 	}
+	go periodicMempoolSync(chain, ChainAdapter[chain], indexer, mempoolResyncInterval)
 	for x := range msg {
 		processMempoolMsg(x)
+	}
+}
+
+func periodicMempoolSync(chain string, chainAdapter adapter.Chain, indexer adapter.Indexer, interval time.Duration) {
+	if interval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		if err := syncExistingMempool(chain, chainAdapter, indexer, processMempoolPinIfMissing); err != nil {
+			log.Printf("[WARN] periodic mempool sync failed for %s: %v", chain, err)
+		}
 	}
 }
 
@@ -179,7 +196,7 @@ func syncExistingMempool(chain string, chainAdapter adapter.Chain, indexer adapt
 
 func processMempoolMsg(x pin.MempollChanMsg) {
 	for _, pinNode := range x.PinList {
-		processMempoolPin(pinNode)
+		processMempoolPinIfMissing(pinNode)
 	}
 }
 

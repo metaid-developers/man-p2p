@@ -7,8 +7,11 @@ import (
 	"man-p2p/p2p"
 	"man-p2p/pin"
 	"strings"
+	"sync"
 	"time"
 )
+
+var mempoolPinInFlight sync.Map
 
 func handleMempoolPin(pinNode *pin.PinInscription) {
 	if pinNode.Operation == "modify" || pinNode.Operation == "revoke" {
@@ -51,6 +54,35 @@ func mempoolMrc20Enabled(pinNode *pin.PinInscription) bool {
 		return false
 	}
 	return strings.HasPrefix(pinNode.Path, "/ft/mrc20/") && Mrc20RuntimeEnabled()
+}
+
+func processMempoolPinIfMissing(pinNode *pin.PinInscription) {
+	if pinNode == nil || pinNode.Id == "" {
+		return
+	}
+	if mempoolPinAlreadyKnown(pinNode.Id) {
+		return
+	}
+	if _, loaded := mempoolPinInFlight.LoadOrStore(pinNode.Id, struct{}{}); loaded {
+		return
+	}
+	if mempoolPinAlreadyKnown(pinNode.Id) {
+		return
+	}
+	processMempoolPin(pinNode)
+}
+
+func mempoolPinAlreadyKnown(pinId string) bool {
+	if pinId == "" || PebbleStore == nil || PebbleStore.Database == nil {
+		return false
+	}
+	if _, err := PebbleStore.Database.GetMempoolPin(pinId); err == nil {
+		return true
+	}
+	if _, err := PebbleStore.Database.GetPinByKey(pinId); err == nil {
+		return true
+	}
+	return false
 }
 
 // handleMempoolMrc20 处理 mempool 中的 MRC20 交易
