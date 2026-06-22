@@ -108,7 +108,7 @@ func DecodeRawTransaction(txBytes []byte) (*RawTransaction, error) {
 		return nil, errors.New("invalid transaction data length")
 	}
 
-	icount, lenth := DecodeVarIntForTx(txBytes[index : index+9])
+	icount, lenth := DecodeVarIntForTx(txBytes[index:])
 	numOfVins := icount
 	rawTx.inSize = uint64(numOfVins)
 	index += lenth
@@ -135,7 +135,7 @@ func DecodeRawTransaction(txBytes []byte) (*RawTransaction, error) {
 			return nil, errors.New("invalid transaction data length")
 		}
 
-		vnumber := txBytes[index : index+9]
+		vnumber := txBytes[index:]
 		icount, lenth = DecodeVarIntForTx(vnumber)
 		scriptLen := icount
 		index += lenth
@@ -152,7 +152,7 @@ func DecodeRawTransaction(txBytes []byte) (*RawTransaction, error) {
 		return nil, errors.New("invalid transaction data length")
 	}
 
-	icount, lenth = DecodeVarIntForTx(txBytes[index : index+9])
+	icount, lenth = DecodeVarIntForTx(txBytes[index:])
 	numOfVouts := icount
 	rawTx.outSize = uint64(numOfVouts)
 	index += lenth
@@ -174,7 +174,7 @@ func DecodeRawTransaction(txBytes []byte) (*RawTransaction, error) {
 			return nil, errors.New("invalid transaction data length")
 		}
 
-		vnumber := txBytes[index : index+9]
+		vnumber := txBytes[index:]
 		icount, lenth = DecodeVarIntForTx(vnumber)
 		lockScriptLen := icount
 		index += lenth
@@ -214,17 +214,29 @@ func DecodeVarIntForTx(buf []byte) (int, int) {
 	//if len(buf) != 9 {
 	//	return 0, 0
 	//}
+	if len(buf) < 1 {
+		return 0, 0
+	}
 	if buf[0] <= 0xfc { //252 uint8_t
 		return int(buf[0]), 1
 	} else if buf[0] == 0xfd { //253 0xFD followed by the length as uint16_t
+		if len(buf) < 3 {
+			return 0, 0
+		}
 		return (int(buf[2]) * int(math.Pow(256, 1))) + int(buf[1]), 3
 	} else if buf[0] == 0xfe { //254 0xFE followed by the length as uint32_t
+		if len(buf) < 5 {
+			return 0, 0
+		}
 		count := (int(buf[4]) * int(math.Pow(256, 3))) +
 			(int(buf[3]) * int(math.Pow(256, 2))) +
 			(int(buf[2]) * int(math.Pow(256, 1))) +
 			int(buf[1])
 		return count, 5
 	} else if buf[0] == 0xff { //255 0xFF followed by the length as uint64_t
+		if len(buf) < 9 {
+			return 0, 0
+		}
 		count := (int(buf[8]) * int(math.Pow(256, 7))) +
 			int(buf[7])*int(math.Pow(256, 6)) +
 			int(buf[6])*int(math.Pow(256, 5)) +

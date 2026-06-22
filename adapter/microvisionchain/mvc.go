@@ -1,6 +1,8 @@
 package microvisionchain
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"log"
 	"man-p2p/common"
 	"man-p2p/pin"
@@ -25,12 +27,34 @@ import (
 )
 
 var (
-	client *rpcclient.Client
+	client        *rpcclient.Client
 	getRawMempool = func() ([]*chainhash.Hash, error) {
 		return client.GetRawMempool()
 	}
 	getRawTransaction = func(txHash *chainhash.Hash) (*bsvutil.Tx, error) {
 		return client.GetRawTransaction(txHash)
+	}
+	getRawTransactionHex = func(txHash *chainhash.Hash) (string, error) {
+		hashParam, err := json.Marshal(txHash.String())
+		if err != nil {
+			return "", err
+		}
+		verboseParam, err := json.Marshal(false)
+		if err != nil {
+			return "", err
+		}
+		result, err := client.RawRequest("getrawtransaction", []json.RawMessage{
+			hashParam,
+			verboseParam,
+		})
+		if err != nil {
+			return "", err
+		}
+		var txHex string
+		if err := json.Unmarshal(result, &txHex); err != nil {
+			return "", err
+		}
+		return txHex, nil
 	}
 )
 
@@ -176,6 +200,19 @@ func (chain *MicroVisionChain) GetMempoolTransactionList() (list []interface{}, 
 	for _, txHash := range txIdList {
 		tx, err := getRawTransaction(txHash)
 		if err != nil {
+			txHex, rawErr := getRawTransactionHex(txHash)
+			if rawErr != nil {
+				continue
+			}
+			raw, rawErr := hex.DecodeString(txHex)
+			if rawErr != nil {
+				continue
+			}
+			rawTx, rawErr := DecodeRawTransaction(raw)
+			if rawErr != nil {
+				continue
+			}
+			list = append(list, rawTx)
 			continue
 		}
 		list = append(list, tx.MsgTx())
