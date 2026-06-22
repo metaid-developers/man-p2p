@@ -206,9 +206,14 @@ func (db *Database) CountAdd(key string, value int64) error {
 }
 
 func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
-	//key是 pinid,value是空
-	//key := common.ConcatBytesOptimized([]string{fmt.Sprintf("%010d", pinNode.Timestamp), "_", pinNode.ChainName, "_", pinNode.Id}, "")
-	return db.PinsMempoolDb.Set([]byte(pinNode.Id), nil, pebble.Sync)
+	if pinNode == nil || pinNode.Id == "" {
+		return nil
+	}
+	value, err := sonic.Marshal(pinNode)
+	if err != nil {
+		return err
+	}
+	return db.PinsMempoolDb.Set([]byte(pinNode.Id), value, pebble.Sync)
 }
 
 // 内存池PIN数据分页
@@ -258,17 +263,20 @@ func (db *Database) GetMempool(key string) ([]byte, error) {
 	result, closer, err := db.PinsMempoolDb.Get([]byte(key))
 	if err != nil {
 		if err == pebble.ErrNotFound {
-			return nil, nil
+			return nil, pebble.ErrNotFound
 		}
-		return nil, fmt.Errorf("GetMempool error: %v", err)
+		return nil, fmt.Errorf("GetMempool error: %w", err)
 	}
 	defer closer.Close()
-	return result, nil
+	return append([]byte(nil), result...), nil
 }
 func (db *Database) GetMempoolPin(key string) (pinNode pin.PinInscription, err error) {
 	result, err := db.GetMempool(key)
 	if err != nil {
 		return
+	}
+	if len(result) == 0 {
+		return pinNode, pebble.ErrNotFound
 	}
 	err = sonic.Unmarshal(result, &pinNode)
 	return

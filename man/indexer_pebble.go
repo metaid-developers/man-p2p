@@ -210,7 +210,10 @@ func (pd *PebbleData) handleTransfer(chainName string, outputList []string, bloc
 func (pd *PebbleData) GetPinById(pinid string) (pinNode pin.PinInscription, err error) {
 	result, err := pd.Database.GetPinByKey(pinid)
 	if err != nil {
-		return
+		if err == pebble.ErrNotFound {
+			return pd.Database.GetMempoolPin(pinid)
+		}
+		return pinNode, err
 	}
 	err = sonic.Unmarshal(result, &pinNode)
 	return
