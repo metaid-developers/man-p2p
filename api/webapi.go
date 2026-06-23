@@ -85,6 +85,7 @@ func Start(f embed.FS) {
 	gin.DefaultWriter = io.Discard
 	startLocalDebugServerFromEnv()
 	r := gin.Default()
+	r.Use(SlowRequestLogger())
 	funcMap := template.FuncMap{
 		"formatRootId":   formatRootId,
 		"popLevelCount":  popLevelCount,
@@ -150,14 +151,8 @@ func Start(f embed.FS) {
 	// 	r.Run(":7777") // 第2个端口
 	// }()
 	log.Println("Server Start", common.Config.Web.Port)
-	if common.Config.Web.KeyFile != "" && common.Config.Web.PemFile != "" {
-		if err := r.RunTLS(common.Config.Web.Port, common.Config.Web.PemFile, common.Config.Web.KeyFile); err != nil {
-			log.Printf("Server Start failed: %v", err)
-		}
-	} else {
-		if err := r.Run(common.Config.Web.Port); err != nil {
-			log.Printf("Server Start failed: %v", err)
-		}
+	if err := runHTTPServer(common.Config.Web.Port, r, common.Config.Web.PemFile, common.Config.Web.KeyFile); err != nil {
+		log.Printf("Server Start failed: %v", err)
 	}
 
 }
