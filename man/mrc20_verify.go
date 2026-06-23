@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"man-p2p/mrc20"
+	"man-p2p/pebblestore"
 	"strconv"
 
 	"github.com/bytedance/sonic"
@@ -125,21 +126,21 @@ func VerifyMRC20TotalSupply(tickId string) (*MRC20VerifyReport, error) {
 
 // MRC20VerifyReport 验证报告
 type MRC20VerifyReport struct {
-	TickId         string                     `json:"tickId"`
-	TickName       string                     `json:"tickName"`
-	Status         string                     `json:"status"` // ✅ PASSED / ❌ FAILED
-	ExpectedTotal  decimal.Decimal            `json:"expectedTotal"`
-	TotalUTXO      decimal.Decimal            `json:"totalUtxo"`
-	TotalBalance   decimal.Decimal            `json:"totalBalance"`
-	TotalPendingOut decimal.Decimal           `json:"totalPendingOut"`
-	TotalPendingIn  decimal.Decimal           `json:"totalPendingIn"`
-	UTXOCount      int                        `json:"utxoCount"`
-	UTXOByChain    map[string]decimal.Decimal `json:"utxoByChain"`
-	BalanceByChain map[string]decimal.Decimal `json:"balanceByChain"`
+	TickId            string                     `json:"tickId"`
+	TickName          string                     `json:"tickName"`
+	Status            string                     `json:"status"` // ✅ PASSED / ❌ FAILED
+	ExpectedTotal     decimal.Decimal            `json:"expectedTotal"`
+	TotalUTXO         decimal.Decimal            `json:"totalUtxo"`
+	TotalBalance      decimal.Decimal            `json:"totalBalance"`
+	TotalPendingOut   decimal.Decimal            `json:"totalPendingOut"`
+	TotalPendingIn    decimal.Decimal            `json:"totalPendingIn"`
+	UTXOCount         int                        `json:"utxoCount"`
+	UTXOByChain       map[string]decimal.Decimal `json:"utxoByChain"`
+	BalanceByChain    map[string]decimal.Decimal `json:"balanceByChain"`
 	PendingOutByChain map[string]decimal.Decimal `json:"pendingOutByChain"`
 	PendingInByChain  map[string]decimal.Decimal `json:"pendingInByChain"`
-	Errors         []string                   `json:"errors"`
-	Warnings       []string                   `json:"warnings"`
+	Errors            []string                   `json:"errors"`
+	Warnings          []string                   `json:"warnings"`
 }
 
 // calculateChainUTXOTotal 计算某条链上某个代币的UTXO总和
@@ -160,7 +161,7 @@ func calculateChainUTXOTotal(chain, tickId string) (decimal.Decimal, int, error)
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
@@ -198,7 +199,7 @@ func calculateChainBalanceTotal(chain, tickId string) (decimal.Decimal, decimal.
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var accountBalance mrc20.Mrc20AccountBalance
-		if err := sonic.Unmarshal(iter.Value(), &accountBalance); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &accountBalance); err != nil {
 			continue
 		}
 
@@ -267,7 +268,7 @@ func getAllMRC20Ticks() ([]string, error) {
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var deploy mrc20.Mrc20DeployInfo
-		if err := sonic.Unmarshal(iter.Value(), &deploy); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &deploy); err != nil {
 			continue
 		}
 		ticks = append(ticks, deploy.Mrc20Id)

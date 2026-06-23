@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"man-p2p/mrc20"
+	"man-p2p/pebblestore"
 	"man-p2p/pin"
 	"time"
 
@@ -69,7 +70,7 @@ func ListPendingTeleportTransactions() ([]*mrc20.TeleportTransaction, error) {
 	var result []*mrc20.TeleportTransaction
 	for iter.First(); iter.Valid(); iter.Next() {
 		var tx mrc20.TeleportTransaction
-		if err := sonic.Unmarshal(iter.Value(), &tx); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &tx); err != nil {
 			continue
 		}
 
@@ -102,7 +103,7 @@ func ListAllTeleportTransactions(limit int) ([]*mrc20.TeleportTransaction, error
 		}
 
 		var tx mrc20.TeleportTransaction
-		if err := sonic.Unmarshal(iter.Value(), &tx); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &tx); err != nil {
 			continue
 		}
 
@@ -129,7 +130,7 @@ func GetTeleportTransactionByCoord(coord string) (*mrc20.TeleportTransaction, er
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var tx mrc20.TeleportTransaction
-		if err := sonic.Unmarshal(iter.Value(), &tx); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &tx); err != nil {
 			continue
 		}
 
@@ -240,7 +241,7 @@ func ListAllPendingTeleports() ([]*mrc20.PendingTeleport, error) {
 	var result []*mrc20.PendingTeleport
 	for iter.First(); iter.Valid(); iter.Next() {
 		var pending mrc20.PendingTeleport
-		if err := sonic.Unmarshal(iter.Value(), &pending); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &pending); err != nil {
 			continue
 		}
 		result = append(result, &pending)

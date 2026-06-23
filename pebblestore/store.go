@@ -301,7 +301,7 @@ func (idx *Database) MetaIdPageList(page, size int64) (list []pin.MetaIdInfo, er
 			continue
 		}
 		var metaIdInfo pin.MetaIdInfo
-		if err := sonic.Unmarshal(it.Value(), &metaIdInfo); err != nil {
+		if err := sonic.Unmarshal(CloneBytes(it.Value()), &metaIdInfo); err != nil {
 			return nil, err
 		}
 		list = append(list, metaIdInfo)

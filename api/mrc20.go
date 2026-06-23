@@ -7,6 +7,7 @@ import (
 	"man-p2p/common"
 	"man-p2p/man"
 	"man-p2p/mrc20"
+	"man-p2p/pebblestore"
 	"net/http"
 	"strconv"
 	"strings"
@@ -537,7 +538,7 @@ func debugUtxoStatus(ctx *gin.Context) {
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 

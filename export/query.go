@@ -49,7 +49,7 @@ func resolveByGlobalMetaId(db *pebblestore.Database, globalMetaId string) ([]str
 	var result []string
 	for it.First(); it.Valid(); it.Next() {
 		var info pin.MetaIdInfo
-		if err := sonic.Unmarshal(it.Value(), &info); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(it.Value()), &info); err != nil {
 			continue
 		}
 		if info.GlobalMetaId == globalMetaId {

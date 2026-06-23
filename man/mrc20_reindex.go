@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"man-p2p/mrc20"
+	"man-p2p/pebblestore"
 	"strings"
 
 	"github.com/bytedance/sonic"
@@ -280,7 +281,7 @@ func (pd *PebbleData) deleteBlockTransactions(chain string, height int64) error 
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var tx mrc20.Mrc20Transaction
-		if err := sonic.Unmarshal(iter.Value(), &tx); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &tx); err != nil {
 			continue
 		}
 
@@ -316,7 +317,7 @@ func (pd *PebbleData) RecalculateBalance(chain, address, tickId string) error {
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
@@ -418,7 +419,7 @@ func (pd *PebbleData) ReindexBlock(chain string, height int64) error {
 	if iterErr == nil {
 		for iter.First(); iter.Valid(); iter.Next() {
 			var utxo mrc20.Mrc20Utxo
-			if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+			if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 				continue
 			}
 			// 只处理指定链
@@ -519,7 +520,7 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
@@ -701,7 +702,7 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 	if txIter != nil {
 		for txIter.First(); txIter.Valid(); txIter.Next() {
 			var tx mrc20.Mrc20Transaction
-			if err := sonic.Unmarshal(txIter.Value(), &tx); err != nil {
+			if err := sonic.Unmarshal(pebblestore.CloneBytes(txIter.Value()), &tx); err != nil {
 				continue
 			}
 			if tx.BlockHeight >= targetHeight {
@@ -730,7 +731,7 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 				continue
 			}
 			var pending mrc20.PendingTeleport
-			if err := sonic.Unmarshal(pendingTeleportIter.Value(), &pending); err != nil {
+			if err := sonic.Unmarshal(pebblestore.CloneBytes(pendingTeleportIter.Value()), &pending); err != nil {
 				continue
 			}
 			// V1 PendingTeleport structure - deprecated
@@ -761,7 +762,7 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 				continue
 			}
 			var arrival mrc20.Mrc20Arrival
-			if err := sonic.Unmarshal(arrivalIter.Value(), &arrival); err != nil {
+			if err := sonic.Unmarshal(pebblestore.CloneBytes(arrivalIter.Value()), &arrival); err != nil {
 				continue
 			}
 			// 如果属于当前链，且 BlockHeight >= targetHeight 或 status=pending
@@ -799,7 +800,7 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 				continue
 			}
 			var pendingIn mrc20.TeleportPendingIn
-			if err := sonic.Unmarshal(teleportPendingInIter.Value(), &pendingIn); err != nil {
+			if err := sonic.Unmarshal(pebblestore.CloneBytes(teleportPendingInIter.Value()), &pendingIn); err != nil {
 				continue
 			}
 			// 如果属于当前链（目标链），且 BlockHeight >= targetHeight 或 BlockHeight == -1（mempool）
@@ -834,7 +835,7 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 				continue
 			}
 			var pendingIn mrc20.TransferPendingIn
-			if err := sonic.Unmarshal(transferPendingInIter.Value(), &pendingIn); err != nil {
+			if err := sonic.Unmarshal(pebblestore.CloneBytes(transferPendingInIter.Value()), &pendingIn); err != nil {
 				continue
 			}
 			// 如果属于当前链，且 BlockHeight >= targetHeight 或 BlockHeight == -1（mempool）
@@ -902,7 +903,7 @@ func (pd *PebbleData) VerifyBalance(chain, address, tickId string) (bool, error)
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
@@ -944,7 +945,7 @@ func (pd *PebbleData) FixPendingUtxoStatus(chainName string) (int, error) {
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 

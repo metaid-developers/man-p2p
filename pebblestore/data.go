@@ -480,7 +480,7 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 
 		// 解析数据
 		var notif pin.NotifcationData
-		if err := sonic.Unmarshal(it.Value(), &notif); err == nil {
+		if err := sonic.Unmarshal(CloneBytes(it.Value()), &notif); err == nil {
 			seenPins[fromPinId] = struct{}{}
 			list = append(list, notif)
 			if len(list) >= size {

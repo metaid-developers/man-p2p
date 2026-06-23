@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"man-p2p/mrc20"
+	"man-p2p/pebblestore"
 	"man-p2p/pin"
 	"sort"
 	"strings"
@@ -201,7 +202,7 @@ func (pd *PebbleData) GetMrc20TickList(cursor, limit int) ([]mrc20.Mrc20DeployIn
 		}
 
 		var info mrc20.Mrc20DeployInfo
-		err := sonic.Unmarshal(iter.Value(), &info)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &info)
 		if err != nil {
 			log.Println("Unmarshal mrc20 tick error:", err)
 			continue
@@ -582,7 +583,7 @@ func (pd *PebbleData) CheckOperationtx(txId string, isMempool bool) (*mrc20.Mrc2
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err = sonic.Unmarshal(iter.Value(), &utxo)
+		err = sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			continue
 		}
@@ -644,7 +645,7 @@ func (pd *PebbleData) CheckOperationtxAll(txId string, isMempool bool) ([]*mrc20
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err = sonic.Unmarshal(iter.Value(), &utxo)
+		err = sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			continue
 		}
@@ -686,7 +687,7 @@ func (pd *PebbleData) GetMrc20ByAddressAndTick(address, tickId string) ([]*mrc20
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err := sonic.Unmarshal(iter.Value(), &utxo)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			log.Println("Unmarshal mrc20 utxo error:", err)
 			continue
@@ -778,7 +779,7 @@ func (pd *PebbleData) GetMrc20UtxoList(address string, start, limit int) ([]*mrc
 	count := 0
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err := sonic.Unmarshal(iter.Value(), &utxo)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			log.Println("Unmarshal mrc20 utxo error:", err)
 			continue
@@ -821,7 +822,7 @@ func (pd *PebbleData) GetMrc20TransferHistory(mrc20Id string, start, limit int) 
 	// 先收集所有匹配的数据
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err := sonic.Unmarshal(iter.Value(), &utxo)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			log.Println("Unmarshal mrc20 utxo error:", err)
 			continue
@@ -925,7 +926,7 @@ func (pd *PebbleData) GetMrc20AddressHistoryWithDirection(mrc20Id, address strin
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err := sonic.Unmarshal(iter.Value(), &utxo)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			continue
 		}
@@ -1065,7 +1066,7 @@ func (pd *PebbleData) GetMrc20Holders(tickId string, start, limit int, searchAdd
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
@@ -1138,7 +1139,7 @@ func (pd *PebbleData) GetMrc20HoldersCount(tickId string, searchAddress string) 
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		err := sonic.Unmarshal(iter.Value(), &utxo)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo)
 		if err != nil {
 			continue
 		}
@@ -1517,7 +1518,7 @@ func (pd *PebbleData) GetAllPendingTeleports() ([]*mrc20.PendingTeleport, error)
 		}
 
 		var pending mrc20.PendingTeleport
-		err := sonic.Unmarshal(iter.Value(), &pending)
+		err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &pending)
 		if err != nil {
 			continue
 		}
@@ -1787,7 +1788,7 @@ func (pd *PebbleData) CleanMempoolMrc20ByTxIds(txIds []string) error {
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
@@ -1878,7 +1879,7 @@ func (pd *PebbleData) ConfirmPendingTransfersByTxIds(txIdSet map[string]struct{}
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"man-p2p/mrc20"
+	"man-p2p/pebblestore"
 	"man-p2p/pin"
 	"strings"
 
@@ -114,7 +115,7 @@ func (pd *PebbleData) GetMrc20AccountAllBalances(chain, address string) ([]*mrc2
 	var balances []*mrc20.Mrc20AccountBalance
 	for iter.First(); iter.Valid(); iter.Next() {
 		var balance mrc20.Mrc20AccountBalance
-		if err := sonic.Unmarshal(iter.Value(), &balance); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &balance); err != nil {
 			log.Printf("Failed to unmarshal balance: %v", err)
 			continue
 		}
@@ -467,7 +468,7 @@ func (pd *PebbleData) RecalculateAccountBalance(chain, address, tickId string) (
 
 	for iter.First(); iter.Valid(); iter.Next() {
 		var utxo mrc20.Mrc20Utxo
-		if err := sonic.Unmarshal(iter.Value(), &utxo); err != nil {
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
