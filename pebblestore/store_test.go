@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cockroachdb/pebble"
 )
 
 func TestBatchInsertPins(t *testing.T) {
@@ -89,4 +91,106 @@ func TestPebbleMerge(t *testing.T) {
 	v, closer, err := idx.AddressDB.Get([]byte("a"))
 	defer closer.Close()
 	fmt.Println(err, string(v))
+}
+
+func TestGetPinByKeyReturnsIndependentBytes(t *testing.T) {
+	pinDB, err := pebble.Open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("pebble.Open err: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := pinDB.Close(); err != nil {
+			t.Errorf("pinDB.Close err: %v", err)
+		}
+	})
+
+	idx := &Database{PinsDBs: []*pebble.DB{pinDB}}
+	key := "pin-independent-bytes"
+	firstValue := []byte("first pin value")
+	secondValue := []byte("second pin value with different bytes")
+
+	if err := pinDB.Set([]byte(key), firstValue, nil); err != nil {
+		t.Fatalf("pinDB.Set first err: %v", err)
+	}
+	firstRead, err := idx.GetPinByKey(key)
+	if err != nil {
+		t.Fatalf("GetPinByKey first err: %v", err)
+	}
+	if len(firstRead) == 0 {
+		t.Fatal("GetPinByKey first read returned empty value")
+	}
+	firstRead[0] = 'X'
+	reread, err := idx.GetPinByKey(key)
+	if err != nil {
+		t.Fatalf("GetPinByKey reread err: %v", err)
+	}
+	if string(reread) != string(firstValue) {
+		t.Fatalf("reread after mutating returned slice = %q, want %q", string(reread), string(firstValue))
+	}
+
+	if err := pinDB.Set([]byte(key), secondValue, nil); err != nil {
+		t.Fatalf("pinDB.Set second err: %v", err)
+	}
+	secondRead, err := idx.GetPinByKey(key)
+	if err != nil {
+		t.Fatalf("GetPinByKey second err: %v", err)
+	}
+
+	if string(secondRead) != string(secondValue) {
+		t.Fatalf("second read = %q, want %q", string(secondRead), string(secondValue))
+	}
+	if string(firstRead) != "X"+string(firstValue[1:]) {
+		t.Fatalf("mutated first read changed after overwrite: got %q, want %q", string(firstRead), "X"+string(firstValue[1:]))
+	}
+}
+
+func TestGetMempoolReturnsIndependentBytes(t *testing.T) {
+	mempoolDB, err := pebble.Open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("pebble.Open err: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := mempoolDB.Close(); err != nil {
+			t.Errorf("mempoolDB.Close err: %v", err)
+		}
+	})
+
+	idx := &Database{PinsMempoolDb: mempoolDB}
+	key := "mempool-independent-bytes"
+	firstValue := []byte("first mempool value")
+	secondValue := []byte("second mempool value with different bytes")
+
+	if err := mempoolDB.Set([]byte(key), firstValue, nil); err != nil {
+		t.Fatalf("mempoolDB.Set first err: %v", err)
+	}
+	firstRead, err := idx.GetMempool(key)
+	if err != nil {
+		t.Fatalf("GetMempool first err: %v", err)
+	}
+	if len(firstRead) == 0 {
+		t.Fatal("GetMempool first read returned empty value")
+	}
+	firstRead[0] = 'X'
+	reread, err := idx.GetMempool(key)
+	if err != nil {
+		t.Fatalf("GetMempool reread err: %v", err)
+	}
+	if string(reread) != string(firstValue) {
+		t.Fatalf("reread after mutating returned slice = %q, want %q", string(reread), string(firstValue))
+	}
+
+	if err := mempoolDB.Set([]byte(key), secondValue, nil); err != nil {
+		t.Fatalf("mempoolDB.Set second err: %v", err)
+	}
+	secondRead, err := idx.GetMempool(key)
+	if err != nil {
+		t.Fatalf("GetMempool second err: %v", err)
+	}
+
+	if string(secondRead) != string(secondValue) {
+		t.Fatalf("second read = %q, want %q", string(secondRead), string(secondValue))
+	}
+	if string(firstRead) != "X"+string(firstValue[1:]) {
+		t.Fatalf("mutated first read changed after overwrite: got %q, want %q", string(firstRead), "X"+string(firstValue[1:]))
+	}
 }

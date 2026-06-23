@@ -1,6 +1,7 @@
 package man
 
 import (
+	"context"
 	"testing"
 
 	"man-p2p/common"
@@ -100,7 +101,7 @@ func TestGetMempoolPageListFallsBackToTimestampWhenSeenTimeMissing(t *testing.T)
 		}
 	}
 
-	list, err := pd.Database.GetMempoolPageList(0, 1)
+	list, err := pd.Database.GetMempoolPageList(context.Background(), 0, 1)
 	if err != nil {
 		t.Fatalf("GetMempoolPageList error: %v", err)
 	}

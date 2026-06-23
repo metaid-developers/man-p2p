@@ -21,6 +21,30 @@ type ApiResponse struct {
 	Data interface{} `json:"data"`
 }
 
+const (
+	defaultMempoolPageSize int64 = 100
+	maxMempoolPageSize     int64 = 500
+	maxMempoolOffset       int64 = 50000
+)
+
+func normalizeMempoolPageSize(size int64) int64 {
+	if size <= 0 {
+		return defaultMempoolPageSize
+	}
+	if size > maxMempoolPageSize {
+		return maxMempoolPageSize
+	}
+	return size
+}
+
+func validateMempoolPage(page int64, size int64) bool {
+	if page < 1 {
+		return false
+	}
+	size = normalizeMempoolPageSize(size)
+	return page-1 <= maxMempoolOffset/size
+}
+
 func btcJsonApi(r *gin.Engine) {
 	btcGroup := r.Group("/api")
 	btcGroup.Use(CorsMiddleware())
@@ -108,7 +132,7 @@ func pinList(ctx *gin.Context) {
 }
 func mempoolList(ctx *gin.Context) {
 	page, err := strconv.ParseInt(ctx.Query("page"), 10, 64)
-	if err != nil {
+	if err != nil || page < 1 {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
@@ -117,7 +141,12 @@ func mempoolList(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
-	list, err := man.PebbleStore.Database.GetMempoolPageList(page-1, size)
+	size = normalizeMempoolPageSize(size)
+	if !validateMempoolPage(page, size) {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
+		return
+	}
+	list, err := man.PebbleStore.Database.GetMempoolPageList(ctx.Request.Context(), page-1, size)
 	if err != nil {
 		ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"Pins": []pin.PinMsg{}, "Count": 0, "Active": "mempool"}))
 		return

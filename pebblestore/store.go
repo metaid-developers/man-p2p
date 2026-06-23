@@ -495,20 +495,13 @@ type PageBlock struct {
 // key 格式: chainName_pins_txid:outputindex
 func (idx *Database) GetPinByKey(key string) ([]byte, error) {
 	db := idx.getShard(key)
-	val, closer, err := db.Get([]byte(key))
-	if err != nil {
-		return nil, err
-	}
-	closer.Close() // 直接调用，避免 defer 带来的性能损耗
-	return val, nil
+	return getClonedValue(db, []byte(key))
 }
 func (idx *Database) GetPinInscriptionByKey(key string) (pinNode pin.PinInscription, err error) {
-	db := idx.getShard(key)
-	val, closer, err := db.Get([]byte(key))
+	val, err := idx.GetPinByKey(key)
 	if err != nil {
 		return
 	}
-	closer.Close() // 直接调用，避免 defer 带来的性能损耗
 	if val != nil && len(val) == 0 {
 		return
 	}

@@ -83,6 +83,7 @@ func CorsMiddleware() gin.HandlerFunc {
 func Start(f embed.FS) {
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = io.Discard
+	startLocalDebugServerFromEnv()
 	r := gin.Default()
 	funcMap := template.FuncMap{
 		"formatRootId":   formatRootId,
@@ -256,11 +257,11 @@ func pinPageList(ctx *gin.Context) {
 
 func mempool(ctx *gin.Context) {
 	page, err := strconv.ParseInt(ctx.Param("page"), 10, 64)
-	if err != nil {
-		ctx.String(200, "fail")
+	if err != nil || !validateMempoolPage(page, defaultMempoolPageSize) {
+		ctx.String(http.StatusOK, "fail")
 		return
 	}
-	list, err := man.PebbleStore.Database.GetMempoolPageList(page-1, 100)
+	list, err := man.PebbleStore.Database.GetMempoolPageList(ctx.Request.Context(), page-1, defaultMempoolPageSize)
 	// list, err := man.DbAdapter.GetMempoolPinPageList(page, 100)
 	if err != nil {
 		ctx.String(200, "fail")

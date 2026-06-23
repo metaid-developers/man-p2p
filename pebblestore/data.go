@@ -1,7 +1,10 @@
 package pebblestore
 
 import (
+	"container/heap"
+	"context"
 	"fmt"
+	"log"
 	"man-p2p/common"
 	"man-p2p/pin"
 	"sort"
@@ -216,16 +219,109 @@ func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
 	return db.PinsMempoolDb.Set([]byte(pinNode.Id), value, pebble.Sync)
 }
 
+const maxMempoolListSummaryBytes = 4096
+
+type mempoolCandidate struct {
+	sortTime int64
+	id       string
+	pinNode  *pin.PinInscription
+}
+
+type mempoolMinHeap []mempoolCandidate
+
+func (h mempoolMinHeap) Len() int {
+	return len(h)
+}
+
+func (h mempoolMinHeap) Less(i, j int) bool {
+	if h[i].sortTime == h[j].sortTime {
+		return h[i].id < h[j].id
+	}
+	return h[i].sortTime < h[j].sortTime
+}
+
+func (h mempoolMinHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *mempoolMinHeap) Push(x interface{}) {
+	*h = append(*h, x.(mempoolCandidate))
+}
+
+func (h *mempoolMinHeap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[:n-1]
+	return x
+}
+
+func boundedMempoolListSummary(value string) string {
+	if len(value) > maxMempoolListSummaryBytes {
+		value = value[:maxMempoolListSummaryBytes]
+	}
+	return strings.Clone(value)
+}
+
+func trimMempoolPinForList(pinNode *pin.PinInscription) {
+	if pinNode == nil {
+		return
+	}
+	if pinNode.ContentSummary == "" && len(pinNode.ContentBody) > 0 {
+		summaryBytes := pinNode.ContentBody
+		if len(summaryBytes) > maxMempoolListSummaryBytes {
+			summaryBytes = summaryBytes[:maxMempoolListSummaryBytes]
+		}
+		pinNode.ContentSummary = string(summaryBytes)
+	} else if pinNode.ContentSummary != "" {
+		pinNode.ContentSummary = boundedMempoolListSummary(pinNode.ContentSummary)
+	}
+	pinNode.ContentBody = nil
+	pinNode.OriginalContentBody = nil
+}
+
 // 内存池PIN数据分页
-func (db *Database) GetMempoolPageList(page int64, size int64) ([]*pin.PinInscription, error) {
-	var result []*pin.PinInscription
+func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int64) ([]*pin.PinInscription, error) {
+	const (
+		maxMempoolStoragePageSize int64 = 500
+		maxMempoolStorageOffset   int64 = 50000
+	)
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if page < 0 {
+		page = 0
+	}
+	if size <= 0 {
+		size = 100
+	}
+	if size > maxMempoolStoragePageSize {
+		size = maxMempoolStoragePageSize
+	}
+	if page > maxMempoolStorageOffset/size {
+		return []*pin.PinInscription{}, nil
+	}
+	limit := int((page + 1) * size)
+	if limit <= 0 {
+		return []*pin.PinInscription{}, nil
+	}
+
 	iter, err := db.PinsMempoolDb.NewIter(nil)
 	if err != nil {
-		return result, err
+		return nil, err
 	}
 	defer iter.Close()
 
+	candidates := &mempoolMinHeap{}
+	heap.Init(candidates)
 	for iter.First(); iter.Valid(); iter.Next() {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		key := string(iter.Key())
 
 		data, err := db.GetPinByKey(key)
@@ -235,9 +331,31 @@ func (db *Database) GetMempoolPageList(page int64, size int64) ([]*pin.PinInscri
 		var pinNode pin.PinInscription
 		err = sonic.Unmarshal(data, &pinNode)
 		if err != nil {
+			log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", key, err)
 			continue
 		}
-		result = append(result, &pinNode)
+		trimMempoolPinForList(&pinNode)
+
+		candidate := mempoolCandidate{
+			sortTime: pin.EffectiveSortTime(&pinNode),
+			id:       pinNode.Id,
+			pinNode:  &pinNode,
+		}
+		if candidates.Len() < limit {
+			heap.Push(candidates, candidate)
+			continue
+		}
+		worst := (*candidates)[0]
+		if candidate.sortTime > worst.sortTime || candidate.sortTime == worst.sortTime && candidate.id > worst.id {
+			heap.Pop(candidates)
+			heap.Push(candidates, candidate)
+		}
+	}
+
+	result := make([]*pin.PinInscription, 0, candidates.Len())
+	for candidates.Len() > 0 {
+		candidate := heap.Pop(candidates).(mempoolCandidate)
+		result = append(result, candidate.pinNode)
 	}
 
 	sort.SliceStable(result, func(i, j int) bool {
