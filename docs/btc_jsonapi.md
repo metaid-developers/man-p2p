@@ -184,7 +184,7 @@
 **GET** `/api/metaid/pin/list/:metaid`
 
 **参数：**
-- `metaid` (string, 路径参数)：metaid
+- `metaid` (string, 路径参数)：legacy metaid；也兼容合法的 GlobalMetaID（`id...`），服务端会按 BTC mainnet legacy 地址别名转换后复用 legacy metaid 查询
 - `cursor` (int64, 必填)：跳过条数
 - `size` (int64, 必填)：返回条数
 - `path` (string, 必填)：路径

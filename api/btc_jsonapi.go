@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"man-p2p/api/respond"
 	"man-p2p/common"
+	"man-p2p/idaddress"
 	"man-p2p/man"
 	"man-p2p/pin"
 	"net/http"
@@ -19,6 +20,17 @@ type ApiResponse struct {
 	Code int         `json:"code"`
 	Msg  string      `json:"message"`
 	Data interface{} `json:"data"`
+}
+
+func resolvePinListMetaId(metaid string) (string, error) {
+	if !common.ValidateGlobalMetaId(metaid) {
+		return metaid, nil
+	}
+	address, err := idaddress.ConvertToBitcoin(metaid, "mainnet")
+	if err != nil {
+		return "", err
+	}
+	return common.GetMetaIdByAddress(address), nil
 }
 
 const (
@@ -360,6 +372,11 @@ func getAllPinByPathAndMetaId(ctx *gin.Context) {
 	}
 	metaid := ctx.Param("metaid")
 	if metaid == "" {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
+		return
+	}
+	metaid, err := resolvePinListMetaId(metaid)
+	if err != nil {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
