@@ -55,7 +55,7 @@ func handleRevokePin(pinList []*pin.PinInscription) {
 	if len(pinList) <= 0 {
 		return
 	}
-	var revokePins []pin.PinInscription
+	revokePins := make(map[string]pin.PinInscription)
 	//找出待修改的目标PIN，修改状态
 	for _, pinNode := range pinList {
 		pinNode.OriginalPath = pinNode.Path
@@ -65,15 +65,23 @@ func handleRevokePin(pinList []*pin.PinInscription) {
 			continue
 		}
 		targetPin := findModifyTargetPin(targetPinId, "revoke")
-		if targetPin == nil {
-			continue
+		if targetPin != nil {
+			// 修改目标PIN的状态
+			targetPin.Status = -1 //已撤销
+			revokePins[targetPin.Id] = *targetPin
 		}
-		// 修改目标PIN的状态
-		targetPin.Status = -1 //已撤销
-		revokePins = append(revokePins, *targetPin)
+		originalTargetPin := findModifyTargetPin(targetPinId, "modify")
+		if originalTargetPin != nil {
+			originalTargetPin.Status = -1 //已撤销
+			revokePins[originalTargetPin.Id] = *originalTargetPin
+		}
 	}
 	if len(revokePins) > 0 {
-		PebbleStore.Database.BatchInsertPins(revokePins)
+		updatePins := make([]pin.PinInscription, 0, len(revokePins))
+		for _, pinNode := range revokePins {
+			updatePins = append(updatePins, pinNode)
+		}
+		PebbleStore.Database.BatchInsertPins(updatePins)
 	}
 	revokePins = nil
 }
