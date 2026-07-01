@@ -212,7 +212,7 @@ func home(ctx *gin.Context) {
 	}
 	var msg []*pin.PinMsg
 	for _, p := range list {
-		pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Operation: p.Operation, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, PopLv: p.PopLv, MetaId: p.MetaId, ChainName: p.ChainName, SeenTime: p.SeenTime}
+		pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Operation: p.Operation, Status: p.Status, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, PopLv: p.PopLv, MetaId: p.MetaId, ChainName: p.ChainName, SeenTime: p.SeenTime}
 		msg = append(msg, pmsg)
 	}
 	//count := man.DbAdapter.Count()
@@ -234,7 +234,7 @@ func pinPageList(ctx *gin.Context) {
 	}
 	var msg []*pin.PinMsg
 	for _, p := range list {
-		pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Operation: p.Operation, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, Pop: p.Pop, ChainName: p.ChainName, SeenTime: p.SeenTime}
+		pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Operation: p.Operation, Status: p.Status, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, Pop: p.Pop, ChainName: p.ChainName, SeenTime: p.SeenTime}
 		msg = append(msg, pmsg)
 	}
 	//count := man.DbAdapter.Count()
@@ -264,7 +264,7 @@ func mempool(ctx *gin.Context) {
 	}
 	var msg []*pin.PinMsg
 	for _, p := range list {
-		pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Operation: p.Operation, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, MetaId: p.MetaId, SeenTime: p.SeenTime}
+		pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Operation: p.Operation, Status: p.Status, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, MetaId: p.MetaId, SeenTime: p.SeenTime}
 		msg = append(msg, pmsg)
 	}
 	pinsVal, closer, err := man.PebbleStore.Database.CountDB.Get([]byte("pins"))
@@ -412,7 +412,7 @@ func blocks(ctx *gin.Context) {
 	var msgList []int64
 	for _, x := range list {
 		for _, p := range x.PinList {
-			pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Id: p.Id, Type: p.ContentTypeDetect, Height: p.GenesisHeight, SeenTime: p.SeenTime}
+			pmsg := &pin.PinMsg{Content: p.ContentSummary, Number: p.Number, Status: p.Status, Id: p.Id, Type: p.ContentTypeDetect, Height: p.GenesisHeight, SeenTime: p.SeenTime}
 			if _, ok := msgMap[pmsg.Height]; ok {
 				msgMap[pmsg.Height] = append(msgMap[pmsg.Height], pmsg)
 			} else {

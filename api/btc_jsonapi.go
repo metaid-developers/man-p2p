@@ -130,7 +130,7 @@ func pinList(ctx *gin.Context) {
 	for _, p := range list {
 		pmsg := &pin.PinMsg{
 			Content: p.ContentSummary, Number: p.Number, Operation: p.Operation,
-			Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, MetaId: p.MetaId,
+			Status: p.Status, Id: p.Id, Type: p.ContentTypeDetect, Path: p.Path, MetaId: p.MetaId,
 			Pop: p.Pop, ChainName: p.ChainName,
 			InitialOwner: p.InitialOwner, Address: p.Address, CreateAddress: p.CreateAddress,
 			Timestamp: p.Timestamp, SeenTime: p.SeenTime,
@@ -169,6 +169,7 @@ func mempoolList(ctx *gin.Context) {
 			Content:   p.ContentSummary,
 			Number:    p.Number,
 			Operation: p.Operation,
+			Status:    p.Status,
 			Id:        p.Id,
 			Type:      p.ContentTypeDetect,
 			Path:      p.Path,

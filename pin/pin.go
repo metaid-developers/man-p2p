@@ -171,6 +171,7 @@ type PinMsg struct {
 	Content       string `json:"content"`
 	Number        int64  `json:"number"`
 	Operation     string `json:"operation"`
+	Status        int    `json:"status"`
 	Height        int64  `json:"height"`
 	Id            string `json:"id"`
 	Type          string `json:"type"`
