@@ -35,6 +35,7 @@ type Database struct {
 	PinSort       *pebble.DB
 	BlocksDB      *pebble.DB
 	CountDB       *pebble.DB
+	PinAliasDb    *pebble.DB
 	PathPinDB     *pebble.DB
 	AddressDB     *pebble.DB
 	CreatorDb     *pebble.DB
@@ -96,6 +97,12 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 	if err != nil {
 		return nil, err
 	}
+	os.MkdirAll(fmt.Sprintf("%s/pin_alias", basePath), 0755)
+	pinAliasDb, err := pebble.Open(fmt.Sprintf("%s/pin_alias/db", basePath), dbOptions)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
 	os.MkdirAll(fmt.Sprintf("%s/path", basePath), 0755)
 	pathPinDB, err := pebble.Open(fmt.Sprintf("%s/path/db", basePath), dbOptions)
 	if err != nil {
@@ -152,7 +159,7 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 		return nil, err
 	}
 	return &Database{PinsDBs: pinsDBs, PinSort: pinSortDb, BlocksDB: blocksDB,
-		CountDB: countDB, PathPinDB: pathPinDB, AddressDB: addressDB,
+		CountDB: countDB, PinAliasDb: pinAliasDb, PathPinDB: pathPinDB, AddressDB: addressDB,
 		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb}, nil
 }
 
@@ -163,6 +170,9 @@ func (idx *Database) Close() error {
 	}
 	idx.PinSort.Close()
 	idx.BlocksDB.Close()
+	if idx.PinAliasDb != nil {
+		idx.PinAliasDb.Close()
+	}
 	idx.PathPinDB.Close()
 	idx.AddressDB.Close()
 	idx.CountDB.Close()
@@ -177,6 +187,7 @@ func (idx *Database) BatchInsertPins(pins []pin.PinInscription) error {
 		key string
 		val []byte
 	})
+	aliasPairs := make(map[string]string)
 	for _, pin := range pins {
 		//key := BuildPinKey(pin.Txid, pin.OutputIndex)
 		db := idx.getShard(pin.Id)
@@ -189,6 +200,9 @@ func (idx *Database) BatchInsertPins(pins []pin.PinInscription) error {
 			key string
 			val []byte
 		}{pin.Id, content})
+		if pin.LegacyPinId != "" && pin.LegacyPinId != pin.Id {
+			aliasPairs[pin.LegacyPinId] = pin.Id
+		}
 	}
 	for db, kvs := range batches {
 		batch := db.NewBatch()
@@ -200,6 +214,9 @@ func (idx *Database) BatchInsertPins(pins []pin.PinInscription) error {
 			return err
 		}
 		batch.Close()
+	}
+	if err := idx.BatchSetPinAliases(aliasPairs); err != nil {
+		return err
 	}
 	return nil
 }

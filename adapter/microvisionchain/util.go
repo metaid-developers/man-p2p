@@ -94,6 +94,7 @@ func DecodeRawTransaction(txBytes []byte) (*RawTransaction, error) {
 		return nil, errors.New("invalid transaction data")
 	}
 	var rawTx RawTransaction
+	rawTx.Hex = hex.EncodeToString(txBytes)
 	index := 0
 	if index+4 > limit {
 		return nil, errors.New("invalid transaction data length")

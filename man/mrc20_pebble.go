@@ -1204,6 +1204,7 @@ func (pd *PebbleData) SaveMrc20Arrival(arrival *mrc20.Mrc20Arrival) error {
 
 // GetMrc20ArrivalByPinId 根据 PIN ID 获取 arrival 记录 (coord 查询)
 func (pd *PebbleData) GetMrc20ArrivalByPinId(pinId string) (*mrc20.Mrc20Arrival, error) {
+	pinId = pd.resolveCanonicalPinID(pinId)
 	key := fmt.Sprintf("arrival_%s", pinId)
 	value, closer, err := pd.Database.MrcDb.Get([]byte(key))
 	if err != nil {
@@ -1236,6 +1237,7 @@ func (pd *PebbleData) GetMrc20ArrivalByAssetOutpoint(assetOutpoint string) (*mrc
 
 // UpdateMrc20ArrivalStatus 更新 arrival 状态（跃迁完成时调用）
 func (pd *PebbleData) UpdateMrc20ArrivalStatus(pinId string, status mrc20.ArrivalStatus, teleportPinId, teleportChain, teleportTxId string, completedAt int64) error {
+	pinId = pd.resolveCanonicalPinID(pinId)
 	arrival, err := pd.GetMrc20ArrivalByPinId(pinId)
 	if err != nil {
 		return fmt.Errorf("get arrival error: %w", err)
@@ -1346,6 +1348,7 @@ func (pd *PebbleData) SaveMrc20Teleport(teleport *mrc20.Mrc20Teleport) error {
 
 // GetMrc20TeleportByPinId 根据 PIN ID 获取 teleport 记录
 func (pd *PebbleData) GetMrc20TeleportByPinId(pinId string) (*mrc20.Mrc20Teleport, error) {
+	pinId = pd.resolveCanonicalPinID(pinId)
 	key := fmt.Sprintf("teleport_%s", pinId)
 	value, closer, err := pd.Database.MrcDb.Get([]byte(key))
 	if err != nil {
@@ -1364,23 +1367,37 @@ func (pd *PebbleData) GetMrc20TeleportByPinId(pinId string) (*mrc20.Mrc20Telepor
 
 // GetMrc20TeleportByCoord 根据 coord (arrival pinId) 获取 teleport 记录
 func (pd *PebbleData) GetMrc20TeleportByCoord(coord string) (*mrc20.Mrc20Teleport, error) {
-	coordKey := fmt.Sprintf("teleport_coord_%s", coord)
-	pinIdBytes, closer, err := pd.Database.MrcDb.Get([]byte(coordKey))
-	if err != nil {
-		return nil, err
+	candidateCoords := []string{coord}
+	if canonicalCoord := pd.resolveCanonicalPinID(coord); canonicalCoord != "" && canonicalCoord != coord {
+		candidateCoords = append(candidateCoords, canonicalCoord)
 	}
-	closer.Close()
 
-	return pd.GetMrc20TeleportByPinId(string(pinIdBytes))
+	var err error
+	for _, candidateCoord := range candidateCoords {
+		coordKey := fmt.Sprintf("teleport_coord_%s", candidateCoord)
+		pinIdBytes, closer, getErr := pd.Database.MrcDb.Get([]byte(coordKey))
+		err = getErr
+		if err == nil {
+			closer.Close()
+			return pd.GetMrc20TeleportByPinId(string(pinIdBytes))
+		}
+	}
+	return nil, err
 }
 
 // CheckTeleportExists 检查某个 arrival 是否已经有对应的 teleport
 func (pd *PebbleData) CheckTeleportExists(coord string) bool {
-	coordKey := fmt.Sprintf("teleport_coord_%s", coord)
-	_, closer, err := pd.Database.MrcDb.Get([]byte(coordKey))
-	if err == nil {
-		closer.Close()
-		return true
+	candidateCoords := []string{coord}
+	if canonicalCoord := pd.resolveCanonicalPinID(coord); canonicalCoord != "" && canonicalCoord != coord {
+		candidateCoords = append(candidateCoords, canonicalCoord)
+	}
+	for _, candidateCoord := range candidateCoords {
+		coordKey := fmt.Sprintf("teleport_coord_%s", candidateCoord)
+		_, closer, err := pd.Database.MrcDb.Get([]byte(coordKey))
+		if err == nil {
+			closer.Close()
+			return true
+		}
 	}
 	return false
 }
@@ -1449,18 +1466,27 @@ func (pd *PebbleData) SavePendingTeleport(pending *mrc20.PendingTeleport) error 
 
 // GetPendingTeleportByCoord 根据 coord (期望的 arrival pinId) 获取等待的 teleport
 func (pd *PebbleData) GetPendingTeleportByCoord(coord string) (*mrc20.PendingTeleport, error) {
-	coordKey := fmt.Sprintf("pending_teleport_coord_%s", coord)
-	pinIdBytes, closer, err := pd.Database.MrcDb.Get([]byte(coordKey))
-	if err != nil {
-		return nil, err
+	candidateCoords := []string{coord}
+	if canonicalCoord := pd.resolveCanonicalPinID(coord); canonicalCoord != "" && canonicalCoord != coord {
+		candidateCoords = append(candidateCoords, canonicalCoord)
 	}
-	closer.Close()
 
-	return pd.GetPendingTeleportByPinId(string(pinIdBytes))
+	var err error
+	for _, candidateCoord := range candidateCoords {
+		coordKey := fmt.Sprintf("pending_teleport_coord_%s", candidateCoord)
+		pinIdBytes, closer, getErr := pd.Database.MrcDb.Get([]byte(coordKey))
+		err = getErr
+		if err == nil {
+			closer.Close()
+			return pd.GetPendingTeleportByPinId(string(pinIdBytes))
+		}
+	}
+	return nil, err
 }
 
 // GetPendingTeleportByPinId 根据 PIN ID 获取等待的 teleport
 func (pd *PebbleData) GetPendingTeleportByPinId(pinId string) (*mrc20.PendingTeleport, error) {
+	pinId = pd.resolveCanonicalPinID(pinId)
 	key := fmt.Sprintf("pending_teleport_%s", pinId)
 	value, closer, err := pd.Database.MrcDb.Get([]byte(key))
 	if err != nil {
@@ -1479,6 +1505,8 @@ func (pd *PebbleData) GetPendingTeleportByPinId(pinId string) (*mrc20.PendingTel
 
 // DeletePendingTeleport 删除已完成的 pending teleport
 func (pd *PebbleData) DeletePendingTeleport(pinId, coord string) error {
+	pinId = pd.resolveCanonicalPinID(pinId)
+	coord = pd.resolveCanonicalPinID(coord)
 	batch := pd.Database.MrcDb.NewBatch()
 	defer batch.Close()
 

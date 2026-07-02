@@ -113,14 +113,10 @@ func getNotifcationToAddress(pinNode *pin.PinInscription) (toPIN []pin.PinInscri
 	return
 }
 func getPINbyId(pinId string) (pinNode pin.PinInscription, err error) {
-	pinNode, err = PebbleStore.Database.GetPinInscriptionByKey(pinId)
-	switch err {
-	case nil:
-		return
-	case pebble.ErrNotFound:
-		pinNode, err = PebbleStore.Database.GetMempoolPin(pinId)
+	if PebbleStore == nil {
+		return pinNode, pebble.ErrNotFound
 	}
-	return
+	return PebbleStore.GetPinById(pinId)
 }
 func getFollowPin(pinNode *pin.PinInscription) (toPIN []pin.PinInscription, err error) {
 	metaid := string(pinNode.ContentBody)

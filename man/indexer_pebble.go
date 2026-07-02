@@ -208,15 +208,29 @@ func (pd *PebbleData) handleTransfer(chainName string, outputList []string, bloc
 }
 
 func (pd *PebbleData) GetPinById(pinid string) (pinNode pin.PinInscription, err error) {
-	result, err := pd.Database.GetPinByKey(pinid)
-	if err != nil {
-		if err == pebble.ErrNotFound {
-			return pd.Database.GetMempoolPin(pinid)
-		}
-		return pinNode, err
+	candidateIDs := []string{pinid}
+	if canonicalID := pd.resolveCanonicalPinID(pinid); canonicalID != "" && canonicalID != pinid {
+		candidateIDs = append(candidateIDs, canonicalID)
 	}
-	err = sonic.Unmarshal(result, &pinNode)
-	return
+
+	for _, candidateID := range candidateIDs {
+		result, getErr := pd.Database.GetPinByKey(candidateID)
+		if getErr == nil {
+			err = sonic.Unmarshal(result, &pinNode)
+			return
+		}
+		if getErr == pebble.ErrNotFound {
+			pinNode, err = pd.Database.GetMempoolPin(candidateID)
+			if err == nil {
+				return
+			}
+		} else {
+			err = getErr
+			return pinNode, err
+		}
+		err = getErr
+	}
+	return pinNode, err
 }
 
 func (pd *PebbleData) GetPinByMetaIdAndPathPageList(metaid, path string, cursor string, size int64) (pinList []*pin.PinInscription, total int64, nextCursor string, err error) {

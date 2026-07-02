@@ -33,6 +33,7 @@ const StandardPinUtxoValue = 546
 
 type PinInscription struct {
 	Id                     string          `json:"id"`
+	LegacyPinId            string          `json:"-"`
 	Number                 int64           `json:"number"`
 	MetaId                 string          `json:"metaid"`
 	Address                string          `json:"address"`

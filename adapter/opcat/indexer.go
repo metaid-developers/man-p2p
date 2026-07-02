@@ -226,6 +226,7 @@ func (indexer *Indexer) GetOWnerAddress(inputId string, tx *wire.MsgTx) (info *p
 func (indexer *Indexer) CatchPinsByTx(msgTxInf interface{}, blockHeight int64, timestamp int64, blockHash string, merkleRoot string, txIndex int) (pinInscriptions []*pin.PinInscription) {
 	msgTx := msgTxInf.(*wire.MsgTx)
 	haveOpReturn := false
+	legacyTxHash := msgTx.TxHash().String()
 	for i, out := range msgTx.TxOut {
 		pinInscription := indexer.ParsePin(out.PkScript)
 		if pinInscription == nil {
@@ -290,6 +291,7 @@ func (indexer *Indexer) CatchPinsByTx(msgTxInf interface{}, blockHeight int64, t
 			DataValue:          pin.RarityScoreBinary(indexer.ChainName, pop),
 			Mrc20MintId:        []string{},
 			Host:               host,
+			LegacyPinId:        legacyPinID(legacyTxHash, txHash, i),
 		})
 		haveOpReturn = true
 		break
@@ -298,6 +300,13 @@ func (indexer *Indexer) CatchPinsByTx(msgTxInf interface{}, blockHeight int64, t
 		return nil
 	}
 	return
+}
+
+func legacyPinID(legacyTxHash string, canonicalTxHash string, outIdx int) string {
+	if legacyTxHash == "" || canonicalTxHash == "" || legacyTxHash == canonicalTxHash {
+		return ""
+	}
+	return fmt.Sprintf("%si%d", legacyTxHash, outIdx)
 }
 
 func (indexer *Indexer) catchPinsByVerboseTx(tx opcatVerboseTx, blockHeight int64, timestamp int64, blockHash string, merkleRoot string, txIndex int) (pinInscriptions []*pin.PinInscription) {

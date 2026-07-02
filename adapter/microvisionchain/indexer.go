@@ -372,6 +372,7 @@ func (indexer *Indexer) CatchPinsByTx(msgTxInf interface{}, blockHeight int64, t
 	msgTx := msgTxInf.(*wire.MsgTx)
 	//check OpReturn data
 	haveOpReturn := false
+	legacyTxHash := msgTx.TxHash().String()
 	//chain := MicroVisionChain{}
 	for i, out := range msgTx.TxOut {
 		pinInscription := indexer.ParsePin(out.PkScript)
@@ -446,6 +447,7 @@ func (indexer *Indexer) CatchPinsByTx(msgTxInf interface{}, blockHeight int64, t
 			DataValue:          pin.RarityScoreBinary(indexer.ChainName, pop),
 			Mrc20MintId:        []string{},
 			Host:               host,
+			LegacyPinId:        legacyPinID(legacyTxHash, txHash, outIdx),
 		})
 		haveOpReturn = true
 		break
@@ -458,6 +460,10 @@ func (indexer *Indexer) CatchPinsByTx(msgTxInf interface{}, blockHeight int64, t
 
 func (indexer *Indexer) CatchPinsByRawTx(rawTx *RawTransaction, blockHeight int64, timestamp int64, blockHash string, merkleRoot string, txIndex int) (pinInscriptions []*pin.PinInscription) {
 	haveOpReturn := false
+	legacyTxHash := rawTx.TxID
+	if rawTx.Hex != "" {
+		legacyTxHash = GetTxID(rawTx.Hex)
+	}
 	for i, out := range rawTx.Vouts {
 		pinInscription := indexer.ParsePin(out.lockScript)
 		if pinInscription == nil {
@@ -520,6 +526,7 @@ func (indexer *Indexer) CatchPinsByRawTx(rawTx *RawTransaction, blockHeight int6
 			DataValue:          pin.RarityScoreBinary(indexer.ChainName, pop),
 			Mrc20MintId:        []string{},
 			Host:               host,
+			LegacyPinId:        legacyPinID(legacyTxHash, rawTx.TxID, outIdx),
 		})
 		haveOpReturn = true
 		break
@@ -528,6 +535,13 @@ func (indexer *Indexer) CatchPinsByRawTx(rawTx *RawTransaction, blockHeight int6
 		return nil
 	}
 	return
+}
+
+func legacyPinID(legacyTxHash string, canonicalTxHash string, outIdx int) string {
+	if legacyTxHash == "" || canonicalTxHash == "" || legacyTxHash == canonicalTxHash {
+		return ""
+	}
+	return fmt.Sprintf("%si%d", legacyTxHash, outIdx)
 }
 func getParentPath(path string) (parentPath string) {
 	arr := strings.Split(path, "/")
