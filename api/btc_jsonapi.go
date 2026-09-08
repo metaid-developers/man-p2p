@@ -193,7 +193,15 @@ func getPinById(ctx *gin.Context) {
 		return
 	}
 	//pinMsg.ContentBody = []byte{}
-	pinMsg.ContentSummary = string(pinMsg.ContentBody)
+	if ctx.Query("meta") == "1" {
+		// metadata-only mode: strip content payloads, keep the rest of the record
+		pinMsg.ContentBody = nil
+		pinMsg.ContentSummary = ""
+		pinMsg.OriginalContentBody = nil
+		pinMsg.OriginalContentSummary = ""
+	} else {
+		pinMsg.ContentSummary = string(pinMsg.ContentBody)
+	}
 	pinMsg.PopLv, _ = pin.PopLevelCount(pinMsg.ChainName, pinMsg.Pop)
 	pinMsg.Preview = common.Config.Web.Host + "/pin/" + pinMsg.Id
 	pinMsg.Content = common.Config.Web.Host + "/content/" + pinMsg.Id
