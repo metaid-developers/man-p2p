@@ -305,13 +305,20 @@
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `path` | string | 是 | Pin path |
-| `size` | int64 | 是 | 返回条数，`<=0` 或 `>100` 会回退到 20 |
-| `cursor` | string | 否 | 游标，首次可为空 |
+| `size` | int64 | 是 | 返回条数，`<=0` 回退 20，`>200` 按 200 截断（响应回显生效 `size`） |
+| `cursor` | string | 否 | 倒序分页游标，首次可为空 |
+| `since` | string | 否 | 增量游标（排他下界）。传入后正序（最旧优先）返回键大于 `since` 的 Pin；首次 `since=0` 从头补齐，之后用返回的 `nextCursor` 作为 `since` 轮询增量直到空列表。游标含 `&` 分隔符，必须 URL 编码后传递（`cursor` 同理） |
 
 返回 `data`：
 - `list`: Pin 列表
 - `total`: 总数
-- `nextCursor`: 下一页游标
+- `nextCursor`: 下一页游标（`since` 模式下即新的增量水位）
+- `size`: 生效的每页条数
+
+列表行内容契约：
+- `content`: 恒为稳定下载地址 `{host}/content/{pinId}`
+- `contentSummary`: 本地持有内容体时为其前 4096 字节；`contentLength > len(contentSummary)` 表示截断；`contentSummary` 为空且 `contentLength > 0` 表示本地仅有元数据
+- `contentBody`: 列表行恒为空
 
 ### 6.14 GET `/api/address/pin/list/:address`
 
@@ -326,7 +333,7 @@
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `path` | string | 是 | Pin path |
-| `size` | int64 | 是 | 返回条数，`<=0` 或 `>100` 会回退到 20 |
+| `size` | int64 | 是 | 返回条数，`<=0` 回退 20，`>200` 按 200 截断 |
 | `cursor` | string | 否 | 游标，首次可为空 |
 
 返回 `data`：
@@ -347,7 +354,7 @@
 | 参数 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `path` | string | 是 | Pin path |
-| `size` | int64 | 是 | 返回条数，`<=0` 或 `>100` 会回退到 20 |
+| `size` | int64 | 是 | 返回条数，`<=0` 回退 20，`>200` 按 200 截断 |
 | `cursor` | string | 是 | 游标（当前实现要求必须传） |
 
 返回 `data`：

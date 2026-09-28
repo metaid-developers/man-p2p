@@ -332,7 +332,7 @@ func (pd *PebbleData) GetPinByMetaIdAndPathPageList(metaid, path string, cursor 
 			if data, ok := pinDataMap[pinId]; ok {
 				var pinNode pin.PinInscription
 				if err := sonic.Unmarshal(data, &pinNode); err == nil {
-					pinNode.ContentSummary = string(pinNode.ContentBody)
+					pinNode.ContentSummary = pinListSummary(pinNode.ContentBody)
 					pinNode.ContentBody = []byte{}
 					pinList = append(pinList, &pinNode)
 				}
@@ -346,6 +346,105 @@ func (pd *PebbleData) GetPinByMetaIdAndPathPageList(metaid, path string, cursor 
 
 	return pinList, total, nextCursor, err
 }
+
+// maxPinListSummaryBytes 限制列表接口返回的 contentSummary 长度，完整内容走 Content 下载地址
+const maxPinListSummaryBytes = 4096
+
+func pinListSummary(body []byte) string {
+	if len(body) > maxPinListSummaryBytes {
+		return string(body[:maxPinListSummaryBytes])
+	}
+	return string(body)
+}
+
+// GetPinByPathSince 按 path 正序增量查询：返回排序键大于 since 的最旧 size 条 Pin。
+// since 为空或 "0" 时从头开始（最旧优先），适合晚加入客户端补齐历史与增量轮询。
+func (pd *PebbleData) GetPinByPathSince(path string, since string, size int64) (pinList []*pin.PinInscription, total int64, nextCursor string, err error) {
+	prefix := common.GetMetaIdByAddress(path) + "&"
+	prefixBytes := []byte(prefix)
+	db := pd.Database.PathPinDB
+	it, err := db.NewIter(nil)
+	if err != nil {
+		return nil, 0, "", err
+	}
+	defer it.Close()
+
+	pathHash := common.GetMetaIdByAddress(path)
+	cntKey := pathHash + "_count"
+	val, closer, err1 := pd.Database.CountDB.Get([]byte(cntKey))
+	if err1 == nil {
+		total, _ = strconv.ParseInt(string(val), 10, 64)
+		closer.Close()
+	}
+
+	// 定位起点：不早于 path 前缀，也不早于 since 游标
+	start := prefix
+	if since != "" && since != "0" && since > prefix {
+		start = since
+	}
+	it.SeekGE([]byte(start))
+	if !it.Valid() {
+		return pinList, total, "", nil
+	}
+	// since 是排他下界，跳过游标自身
+	if since != "" && since != "0" && string(it.Key()) == since {
+		it.Next()
+	}
+
+	pinIds := make([]string, 0, size)
+	keys := make([]string, 0, size)
+	pinIdSet := make(map[string]bool)
+	var count int64
+
+	for it.Valid() && count < size {
+		key := it.Key()
+		if len(key) < len(prefixBytes) || string(key[:len(prefixBytes)]) != prefix {
+			break
+		}
+		sepCount := 0
+		startIdx := -1
+		for i := 0; i < len(key); i++ {
+			if key[i] == '&' {
+				sepCount++
+				if sepCount == 4 {
+					startIdx = i + 1
+					break
+				}
+			}
+		}
+		if startIdx > 0 && startIdx < len(key) {
+			pinId := string(key[startIdx:])
+			if !pinIdSet[pinId] {
+				pinIdSet[pinId] = true
+				pinIds = append(pinIds, pinId)
+				keys = append(keys, string(key))
+				count++
+			}
+		}
+		it.Next()
+	}
+
+	if len(pinIds) > 0 {
+		pinDataMap := pd.Database.BatchGetPinByKeys(pinIds, false)
+		for _, pinId := range pinIds {
+			if data, ok := pinDataMap[pinId]; ok {
+				var pinNode pin.PinInscription
+				if err := sonic.Unmarshal(data, &pinNode); err == nil {
+					pinNode.ContentSummary = pinListSummary(pinNode.ContentBody)
+					pinNode.ContentBody = []byte{}
+					pinList = append(pinList, &pinNode)
+				}
+			}
+		}
+		// 正序遍历的下一页游标是最后一个 key
+		if len(keys) > 0 {
+			nextCursor = keys[len(keys)-1]
+		}
+	}
+
+	return pinList, total, nextCursor, err
+}
+
 func (pd *PebbleData) GetAllPinByPathPageList(path string, cursor string, size int64) (pinList []*pin.PinInscription, total int64, nextCursor string, err error) {
 	//key是 path&blockTime&chainName&height&pinId
 	//5d7b6c2f61327986929fac2888fc1de467248d99bf80edc23cf7f45d87394068&1757984310&btc&0000000432&58be6bc384edc7e2709462bcee4ffa2e265e086f753456db22368cfe0162fdb8i0
@@ -450,7 +549,7 @@ func (pd *PebbleData) GetAllPinByPathPageList(path string, cursor string, size i
 				var pinNode pin.PinInscription
 				if err := sonic.Unmarshal(data, &pinNode); err == nil {
 					// 在这里设置 ContentSummary 并清空 ContentBody，减少 API 层的处理
-					pinNode.ContentSummary = string(pinNode.ContentBody)
+					pinNode.ContentSummary = pinListSummary(pinNode.ContentBody)
 					pinNode.ContentBody = []byte{}
 					pinList = append(pinList, &pinNode)
 				}

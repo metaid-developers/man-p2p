@@ -39,6 +39,22 @@ const (
 	maxMempoolOffset       int64 = 50000
 )
 
+// pin 列表分页：超出上限按上限截断，不再静默回退到 20
+const (
+	defaultPinListPageSize int64 = 20
+	maxPinListPageSize     int64 = 200
+)
+
+func normalizePinListPageSize(size int64) int64 {
+	if size <= 0 {
+		return defaultPinListPageSize
+	}
+	if size > maxPinListPageSize {
+		return maxPinListPageSize
+	}
+	return size
+}
+
 func normalizeMempoolPageSize(size int64) int64 {
 	if size <= 0 {
 		return defaultMempoolPageSize
@@ -266,10 +282,8 @@ func getPinListByAddress(ctx *gin.Context) {
 	}
 	metaid := common.GetMetaIdByAddress(address)
 	size, _ := strconv.ParseInt(sizeStr, 10, 64)
-	// Limit the maximum size
-	if size <= 0 || size > 100 {
-		size = 20
-	}
+	// 超过上限按 200 截断；非法值回退默认 20
+	size = normalizePinListPageSize(size)
 	// Use cursor-based pagination
 	cursor := ctx.Query("cursor")
 	pinList, total, nextCursor, err := man.PebbleStore.GetPinByMetaIdAndPathPageList(metaid, path, cursor, size)
@@ -337,22 +351,38 @@ func getAllPinByPath(ctx *gin.Context) {
 		return
 	}
 	size, _ := strconv.ParseInt(sizeStr, 10, 64)
-	// Limit the maximum size to prevent querying too much data
-	if size <= 0 || size > 100 {
-		size = 20 // Default to 20 items
-	}
+	// 超过上限按 200 截断；非法值回退默认 20（响应会回显生效的 size）
+	size = normalizePinListPageSize(size)
 	// 使用 cursor 作为 lastKey（可选参数，首次查询为空）
 	cursor := ctx.Query("cursor")
-	pinList1, total, nextCursor, err := man.PebbleStore.GetAllPinByPathPageList(ctx.Query("path"), cursor, size)
-	//fmt.Println(pinList1)
+	// since 为排他下界游标（取自 nextCursor）：正序返回该 path 下的增量数据
+	since := ctx.Query("since")
+
+	var pinList1 []*pin.PinInscription
+	var total int64
+	var nextCursor string
+	var err error
+	if since != "" {
+		pinList1, total, nextCursor, err = man.PebbleStore.GetPinByPathSince(path, since, size)
+	} else {
+		pinList1, total, nextCursor, err = man.PebbleStore.GetAllPinByPathPageList(path, cursor, size)
+	}
 	if err != nil {
 		ctx.JSON(http.StatusOK, respond.ErrNoPinFound)
 		return
 	}
-	sortParams := parseSortParams(ctx, "seenTime")
-	sortPinInscriptionList(pinList1, sortParams)
+	for _, pinNode := range pinList1 {
+		// 稳定的内容下载地址；contentSummary 为空表示本地未持有内容体
+		pinNode.Preview = common.Config.Web.Host + "/pin/" + pinNode.Id
+		pinNode.Content = common.Config.Web.Host + "/content/" + pinNode.Id
+		pinNode.PopLv, _ = pin.PopLevelCount(pinNode.ChainName, pinNode.Pop)
+	}
+	if since == "" {
+		sortParams := parseSortParams(ctx, "seenTime")
+		sortPinInscriptionList(pinList1, sortParams)
+	}
 	// Return list, total count, and next page cursor
-	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": pinList1, "total": total, "nextCursor": nextCursor}))
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": pinList1, "total": total, "nextCursor": nextCursor, "size": size}))
 }
 
 // getAllPinByPathAndMetaId
@@ -393,9 +423,8 @@ func getAllPinByPathAndMetaId(ctx *gin.Context) {
 	if sizeStr != "" {
 		size, _ = strconv.ParseInt(sizeStr, 10, 64)
 	}
-	if size <= 0 || size > 100 {
-		size = 20
-	}
+	// 超过上限按 200 截断；非法值回退默认 20
+	size = normalizePinListPageSize(size)
 	// Use cursor-based pagination
 	cursor := cursorStr
 	pinList, total, nextCursor, err := man.PebbleStore.GetPinByMetaIdAndPathPageList(metaid, path, cursor, size)

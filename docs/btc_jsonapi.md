@@ -149,7 +149,7 @@
 **参数：**
 - `address` (string, 路径参数)：地址
 - `cursor` (int64, 必填)：跳过条数
-- `size` (int64, 必填)：返回条数
+- `size` (int64, 必填)：返回条数；`<=0` 回退 20，`>200` 按 200 截断
 - `path` (string, 必填)：路径
 
 **返回：**
@@ -186,7 +186,7 @@
 **参数：**
 - `metaid` (string, 路径参数)：legacy metaid；也兼容合法的 GlobalMetaID（`id...`），服务端会按 BTC mainnet legacy 地址别名转换后复用 legacy metaid 查询
 - `cursor` (int64, 必填)：跳过条数
-- `size` (int64, 必填)：返回条数
+- `size` (int64, 必填)：返回条数；`<=0` 回退 20，`>200` 按 200 截断
 - `path` (string, 必填)：路径
 
 **返回：**
@@ -221,9 +221,10 @@
 **GET** `/api/pin/path/list`
 
 **参数：**
-- `cursor` (int64, 必填)：跳过条数
-- `size` (int64, 必填)：返回条数
+- `cursor` (string, 可选)：倒序分页游标，首次为空；取上一页返回的 `nextCursor`
+- `size` (int64, 必填)：返回条数；`<=0` 回退 20，`>200` 按 200 截断（响应回显生效的 `size`）
 - `path` (string, 必填)：路径
+- `since` (string, 可选)：增量游标（排他下界），传入后按正序（最旧优先）返回排序键大于 `since` 的 Pin。首次传 `since=0` 从头补齐历史；之后把返回的 `nextCursor` 作为下一次的 `since` 轮询增量，直到返回空列表。游标含 `&` 分隔符，必须 URL 编码后传递（`cursor` 同理）
 
 **返回：**
 ```json
@@ -233,19 +234,31 @@
   "data": {
     "list": [
       {
-        "ContentSummary": "内容摘要",
+        "ContentSummary": "内容摘要（见下方内容契约）",
+        "Content": "http://host/content/pinid",
+        "ContentLength": 1024,
         "Id": "pinid",
         "Path": "/path",
         "MetaId": "metaid",
         "ChainName": "btc",
         "Address": "address",
-        "Timestamp": 1690000000
+        "Timestamp": 1690000000,
+        "Preview": "http://host/pin/pinid",
+        "PopLv": 1
       }
     ],
-    "total": 100
+    "total": 100,
+    "nextCursor": "游标",
+    "size": 20
   }
 }
 ```
+
+**内容契约（协议池遍历专用）：**
+- `content`：始终为稳定的内容下载地址 `{host}/content/{pinId}`，列表行永远携带
+- `contentSummary`：本地持有内容体时为其前 4096 字节；`contentLength > len(contentSummary)` 表示被截断
+- `contentSummary` 为空且 `contentLength > 0`：本地节点只存了元数据（例如超大 pin 仅通过 gossip 元数据入库），完整内容需等同步补齐后经 `content` 地址获取
+- `contentBody`：列表行恒为空
 
 ---
 
