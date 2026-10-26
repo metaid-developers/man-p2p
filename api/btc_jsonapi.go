@@ -90,6 +90,7 @@ func btcJsonApi(r *gin.Engine) {
 	btcGroup.GET("/pin/:numberOrId", getPinById)
 	btcGroup.GET("/pin/ver/:pinid/:ver", pinHistory)
 	btcGroup.GET("/pin/path/list", getAllPinByPath)
+	btcGroup.GET("/protocol/list", protocolList)
 	btcGroup.GET("/address/pin/list/:address", getPinListByAddress)
 	btcGroup.GET("/metaid/pin/list/:metaid", getAllPinByPathAndMetaId)
 	btcGroup.GET("/info/address/:address", getInfoByAddress)

@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"man-p2p/man"
 	"man-p2p/mrc20"
 	"man-p2p/pin"
 
@@ -689,6 +690,38 @@ func sortTeleportTransactionList(list []*mrc20.TeleportTransaction, params sortP
 				b = list[j].CreatedAt
 			}
 			return lessInt64(a, b, params.Desc)
+		})
+	}
+}
+
+func sortProtocolDirList(list []man.ProtocolDirEntry, params sortParams) {
+	if len(list) < 2 {
+		return
+	}
+	by := params.By
+	if by == "" {
+		by = "path"
+	}
+	switch by {
+	case "pintotal":
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessInt64(list[i].PinTotal, list[j].PinTotal, params.Desc)
+		})
+	case "firsttimestamp":
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessInt64(list[i].FirstTimestamp, list[j].FirstTimestamp, params.Desc)
+		})
+	case "firstheight":
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessInt64(list[i].FirstHeight, list[j].FirstHeight, params.Desc)
+		})
+	case "firsttxid":
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessString(list[i].FirstTxid, list[j].FirstTxid, params.Desc)
+		})
+	default: // path
+		sort.SliceStable(list, func(i, j int) bool {
+			return lessString(list[i].Path, list[j].Path, params.Desc)
 		})
 	}
 }
