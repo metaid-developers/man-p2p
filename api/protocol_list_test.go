@@ -18,6 +18,11 @@ import (
 func setupProtocolListRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 
+	// 目录快照是 man 包级缓存：开测前清空（含等在飞后台重建）防上个用例
+	// 的数据带入；收尾也先清空再关库，防 db.Close() 与在飞全量扫描相撞
+	man.ResetProtocolDirCacheForTest()
+	t.Cleanup(man.ResetProtocolDirCacheForTest)
+
 	origStore := man.PebbleStore
 	origConfig := common.Config
 	db, err := pebblestore.NewDataBase(t.TempDir(), 4)
@@ -27,6 +32,7 @@ func setupProtocolListRouter(t *testing.T) *gin.Engine {
 	man.PebbleStore = &man.PebbleData{Database: db}
 	common.Config = &common.AllConfig{}
 	t.Cleanup(func() {
+		man.ResetProtocolDirCacheForTest()
 		_ = db.Close()
 		man.PebbleStore = origStore
 		common.Config = origConfig

@@ -11,6 +11,7 @@ package man
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,28 +24,20 @@ func swrTestPinId(i int) string {
 	return fmt.Sprintf("%063di0", i)
 }
 
-// swrResetCacheState 清空目录缓存与后台状态（关闭既有探测循环）。
-func swrResetCacheState() {
-	protocolDirCache.Lock()
-	if protocolDirCache.proberStop != nil {
-		close(protocolDirCache.proberStop)
-		protocolDirCache.proberStop = nil
-	}
-	protocolDirCache.entries = nil
-	protocolDirCache.builtAt = time.Time{}
-	protocolDirCache.rebuilding = false
-	protocolDirCache.proberStarted = false
-	protocolDirCache.Unlock()
-}
-
 // swrResetCache 白盒清空；t.Cleanup 再清一次——关掉测试期间启动的
-// 探测循环、回落真实构建缝，防止跨测试干扰。
+// 探测循环、回落真实构建缝，防止跨测试干扰（重置语义见
+// man.ResetProtocolDirCacheForTest）。
 func swrResetCache(t *testing.T) {
 	t.Helper()
-	swrResetCacheState()
+	ResetProtocolDirCacheForTest()
 	t.Cleanup(func() {
-		swrResetCacheState()
+		ResetProtocolDirCacheForTest()
 	})
+}
+
+// swrResetCacheState 兼容保留的显式清空入口（等在在飞后台重建）。
+func swrResetCacheState() {
+	ResetProtocolDirCacheForTest()
 }
 
 // swrRestoreBuildFn 恢复真实构建缝。
@@ -118,6 +111,7 @@ func swrWaitRebuildLanded(t *testing.T, prev time.Time) time.Time {
 //
 // ② 门控释放后后台重建成功换新快照。
 func TestProtocolDirStaleServesOldSnapshotWhileRebuilding(t *testing.T) {
+	swrResetCache(t)
 	swrRestoreBuildFn(t)
 	oldStore := swrNewDB(t, t.TempDir(), 2010, 1) // 旧快照：pinTotal=1
 	newStore := swrNewDB(t, t.TempDir(), 3010, 2) // 重建目标：pinTotal=2
@@ -192,6 +186,7 @@ func TestProtocolDirStaleServesOldSnapshotWhileRebuilding(t *testing.T) {
 // TestProtocolDirBackgroundRebuildFailureKeepsOldSnapshot 后台刷新失败是设计内情形：
 // 旧快照保留、请求不被错误污染、重建触发防重入，下一次请求仍有权再触发。
 func TestProtocolDirBackgroundRebuildFailureKeepsOldSnapshot(t *testing.T) {
+	swrResetCache(t)
 	swrRestoreBuildFn(t)
 	oldStore := swrNewDB(t, t.TempDir(), 4010, 1)
 	newStore := swrNewDB(t, t.TempDir(), 5010, 2)
@@ -202,9 +197,9 @@ func TestProtocolDirBackgroundRebuildFailureKeepsOldSnapshot(t *testing.T) {
 	}
 	staleAt := swrAgeSnapshot(t, freshAt)
 
-	failBuilds := 0
+	var failBuilds atomic.Int32
 	protocolDirBuildFn = func(pd *PebbleData) ([]ProtocolDirEntry, error) {
-		failBuilds++
+		failBuilds.Add(1)
 		return nil, fmt.Errorf("simulated rebuild failure")
 	}
 
@@ -216,11 +211,11 @@ func TestProtocolDirBackgroundRebuildFailureKeepsOldSnapshot(t *testing.T) {
 		t.Fatalf("failed rebuild must keep old snapshot: entries=%v builtAt=%v", got, gotAt)
 	}
 	deadline := time.Now().Add(2 * time.Second)
-	for failBuilds == 0 && time.Now().Before(deadline) {
+	for failBuilds.Load() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if failBuilds != 1 {
-		t.Fatalf("expected exactly one background rebuild attempt (trigger must be deduped), got %d", failBuilds)
+	if failBuilds.Load() != 1 {
+		t.Fatalf("expected exactly one background rebuild attempt (trigger must be deduped), got %d", failBuilds.Load())
 	}
 	protocolDirCache.Lock()
 	keptAt := protocolDirCache.builtAt
@@ -234,6 +229,7 @@ func TestProtocolDirBackgroundRebuildFailureKeepsOldSnapshot(t *testing.T) {
 // TestProtocolDirColdStartSyncFallback 覆盖验收要求的极端情形（允许慢，不允许死）：
 // 无快照时同步兜底构建仍应答；构建失败如实上抛（API 侧维持 ErrServiceError 语义）。
 func TestProtocolDirColdStartSyncFallback(t *testing.T) {
+	swrResetCache(t)
 	swrRestoreBuildFn(t)
 	store := swrNewDB(t, t.TempDir(), 6010, 1)
 
@@ -258,6 +254,7 @@ func TestProtocolDirColdStartSyncFallback(t *testing.T) {
 // TestProtocolDirProberRefreshesWithoutRequests 覆盖后台提前重建：
 // 快照年龄达到提前刷新阈值后，探测循环自动触发重建并换新，不依赖任何用户请求。
 func TestProtocolDirProberRefreshesWithoutRequests(t *testing.T) {
+	swrResetCache(t)
 	swrRestoreBuildFn(t)
 	origTick, origAhead := protocolDirProberTick, protocolDirRefreshAhead
 	t.Cleanup(func() {

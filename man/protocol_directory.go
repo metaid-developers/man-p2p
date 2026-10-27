@@ -108,15 +108,30 @@ var protocolDirCache struct {
 // 测试可注入慢/失败构建来验证不阻塞与降级语义。
 var protocolDirBuildFn = (*PebbleData).BuildProtocolDirectory
 
+// 后台提前重建节奏：protocolDirProberTick 是探测节拍；
+// 快照年龄达到 protocolDirRefreshAhead（< TTL）即触发一次后台重建，
+// 保证一次后台重建至多间隔 protocolDirRefreshAhead + 一次节拍发生，快照常新不过期。
+var (
+	protocolDirProberTick   = time.Minute
+	protocolDirRefreshAhead = 5 * time.Minute
+)
+
 // protocolDirCacheTTL 目录快照缓存时长；全量扫描代价高，避免逐请求重建。
 const protocolDirCacheTTL = 10 * time.Minute
 
 // ProtocolDirectory 返回协议目录快照（默认按 path 升序）。
-// force=true 时跳过缓存强制重建（对应 API 的 refresh=1）。
+// stale-while-revalidate：只要有过往快照就立即返回上一份可用快照——
+// 快照过期或 force=true（API 的 refresh=1）只触发一次后台重建，请求
+// 绝不等重建（生产全量扫描 46–60s，同步重建曾撞 nginx 60s 代理线）；
+// 仅无快照（进程刚起、后台刷新持续失败）时同步构建兜底（允许慢，不允许死）。
+// builtAt 语义保持原样：返回快照的构建时刻（过期快照即其为旧时刻）。
 func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Time, error) {
 	protocolDirCache.Lock()
 	defer protocolDirCache.Unlock()
-	if !force && protocolDirCache.entries != nil && time.Since(protocolDirCache.builtAt) < protocolDirCacheTTL {
+	if protocolDirCache.entries != nil {
+		if force || time.Since(protocolDirCache.builtAt) >= protocolDirCacheTTL {
+			startProtocolDirRebuildLocked(pd)
+		}
 		return protocolDirCache.entries, protocolDirCache.builtAt, nil
 	}
 	entries, err := protocolDirBuildFn(pd)
@@ -125,7 +140,93 @@ func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Ti
 	}
 	protocolDirCache.entries = entries
 	protocolDirCache.builtAt = time.Now()
-	return entries, protocolDirCache.builtAt, nil
+	startProtocolDirProberLocked(pd)
+	return protocolDirCache.entries, protocolDirCache.builtAt, nil
+}
+
+// startProtocolDirRebuildLocked 触发一次后台重建（重建中防重入）。
+// 调用方持锁；重建本身不持锁，读取方不被阻塞。重建失败保留旧快照，
+// 交由下一次过期请求或探测重试。
+func startProtocolDirRebuildLocked(pd *PebbleData) {
+	if pd == nil || protocolDirCache.rebuilding {
+		return
+	}
+	protocolDirCache.rebuilding = true
+	go func() {
+		entries, err := protocolDirBuildFn(pd)
+		protocolDirCache.Lock()
+		defer protocolDirCache.Unlock()
+		protocolDirCache.rebuilding = false
+		if err != nil || entries == nil {
+			return
+		}
+		protocolDirCache.entries = entries
+		protocolDirCache.builtAt = time.Now()
+	}()
+}
+
+// startProtocolDirProberLocked 启动后台提前重建探测（进程级一次）：
+// 每 protocolDirProberTick 检查一次，快照年龄达到 protocolDirRefreshAhead
+// 即后台重建——快照在 TTL 到期前总被换新，防过期不依赖任何用户请求。
+func startProtocolDirProberLocked(pd *PebbleData) {
+	if protocolDirCache.proberStarted {
+		return
+	}
+	protocolDirCache.proberStarted = true
+	stop := make(chan struct{})
+	protocolDirCache.proberStop = stop
+	interval, ahead := protocolDirProberTick, protocolDirRefreshAhead
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				protocolDirCache.Lock()
+				running := protocolDirCache.proberStarted && protocolDirCache.proberStop == stop
+				if running && protocolDirCache.entries != nil && time.Since(protocolDirCache.builtAt) >= ahead {
+					startProtocolDirRebuildLocked(pd)
+				}
+				protocolDirCache.Unlock()
+				if !running {
+					return // 已被重置（test-only）：安静退出，不在已关闭的库上重建
+				}
+			}
+		}
+	}()
+}
+
+// ResetProtocolDirCacheForTest 测试专用：清空目录快照缓存并停掉后台探测，
+// 再等在飞后台重建结束——防止跨测试用例的库存活污染，以及测试收尾
+// db.Close() 与在飞全量扫描相撞（panic: pebble: closed）。生产代码勿调用，
+// 生产库与进程同生命周期，无需重置。
+func ResetProtocolDirCacheForTest() {
+	// 1) 停后台探测（探测只会再触发新重建）
+	protocolDirCache.Lock()
+	if protocolDirCache.proberStop != nil {
+		close(protocolDirCache.proberStop)
+		protocolDirCache.proberStop = nil
+	}
+	protocolDirCache.Unlock()
+	// 2) 等在飞的后台重建退出（完稿落账或失败保留），避免其继续使用
+	//    即将被 Close 的库，也避免它落在清空之后把旧库数据带回来
+	for {
+		protocolDirCache.Lock()
+		inflight := protocolDirCache.rebuilding
+		protocolDirCache.Unlock()
+		if !inflight {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// 3) 清空快照缓存与后台状态
+	protocolDirCache.Lock()
+	protocolDirCache.entries = nil
+	protocolDirCache.builtAt = time.Time{}
+	protocolDirCache.proberStarted = false
+	protocolDirCache.Unlock()
 }
 
 // BuildProtocolDirectory 全量扫描 pins 分片，聚合协议目录：
