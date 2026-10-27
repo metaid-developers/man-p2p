@@ -22,6 +22,11 @@ import (
 // （目录默认按 path 字母序）。快照走 stale-while-revalidate：有过往快照即即时
 // 应答；过期或 refresh=1 只触发后台重建（请求绝不等重建——生产全量扫描
 // 46–60s，同步重建曾撞 nginx 60s 代理线 504）。
+//
+// builtAt（Unix 秒）：当前应答快照的【构建时刻】语义不变。命中盘上持久化
+// 快照（进程重启后首请求即命中）时返回该快照的原构建时刻——它早于重启点，
+// 语义上如实表达"这份聚合数据算齐于彼时"，不因重启拨新；SWR 随后照旧
+// 触发后台重建并在落账时换新 builtAt。响应结构与字段集零变化。
 func protocolList(ctx *gin.Context) {
 	page, err := strconv.ParseInt(ctx.Query("page"), 10, 64)
 	if err != nil || page < 1 {

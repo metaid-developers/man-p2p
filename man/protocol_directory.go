@@ -2,11 +2,15 @@ package man
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"man-p2p/common"
 	"man-p2p/pin"
 
 	"github.com/bytedance/sonic"
@@ -104,6 +108,108 @@ var protocolDirCache struct {
 	proberStop    chan struct{}
 }
 
+// 快照落盘持久化：每次快照生成/换新时同步写入盘上快照，进程启动时装入
+// 最近一份可用快照作为初始缓存——生产重启后首个公网请求不再进入 46–60s
+// 同步冷重建（2026-10-27 生产复现：重启后公网 /api/protocol/list 全 504 约
+// 10 分 50 秒）。盘上快照是加速器不是依赖：读不到、写失败都只记日志，
+// 应答路径永远可用（无盘上快照时维持既有同步兜底）。
+//
+// 存储设施复用既有 mrc20 快照目录（GetSnapshotDir，同属 common.Config.Pebble.Dir
+// 之下的 snapshots/），不发明新的持久化面。
+
+// protocolDirSnapshotPathFn 快照文件路径缝（test-only 注入），nil = 持久化
+// 禁用。生产默认 protocolDirDefaultSnapshotPath（进程生命周期内恒非 nil，
+// 不经本缝切换配置面）；ResetProtocolDirCacheForTest 把缝归 nil，使 Go 包
+// 测试默认不落盘。
+var protocolDirSnapshotPathFn func() string = protocolDirDefaultSnapshotPath
+
+func protocolDirDefaultSnapshotPath() string {
+	return filepath.Join(GetSnapshotDir(common.Config.Pebble.Dir), "protocol_dir.json")
+}
+
+// protocolDirSnapshotFile 盘上快照文件体。BuiltAt 用 time.Time 直接
+// JSON 往返（RFC3339 带纳秒，无损），恢复时保持「快照原构建时刻」不变——
+// 见 ProtocolDirectory 的 builtAt 语义注释。
+type protocolDirSnapshotFile struct {
+	BuiltAt time.Time          `json:"builtAt"`
+	Entries []ProtocolDirEntry `json:"entries"`
+}
+
+// persistProtocolDirSnapshotLocked 把当前快照+构建时刻写盘（临时文件 + rename
+// 原子替换，防进程中途被杀留下半截文件）。调用方持锁（写约 50KB 的文件在
+// 锁内代价可忽略，且保证落盘与缓存换新的次序不乱）；任何失败只记日志。
+// 生产代码勿调 protocolDirSnapshotPathFn=nil（测试经 ResetProtocolDirCacheForTest
+// 归禁用态）。
+func persistProtocolDirSnapshotLocked(entries []ProtocolDirEntry, builtAt time.Time) {
+	if protocolDirSnapshotPathFn == nil || builtAt.IsZero() {
+		return
+	}
+	path := protocolDirSnapshotPathFn()
+	raw, err := sonic.Marshal(protocolDirSnapshotFile{BuiltAt: builtAt, Entries: entries})
+	if err != nil {
+		log.Printf("[ProtocolDir] snapshot marshal failed (serve unaffected): %v", err)
+		return
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		log.Printf("[ProtocolDir] snapshot mkdir %s failed (serve unaffected): %v", dir, err)
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0644); err != nil {
+		log.Printf("[ProtocolDir] snapshot write %s failed (serve unaffected): %v", tmp, err)
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		log.Printf("[ProtocolDir] snapshot rename %s->%s failed (serve unaffected): %v", tmp, path, err)
+		return
+	}
+}
+
+// readProtocolDirSnapshotLocked 读最近一份盘上快照；文件缺失/损坏/元数据
+// 不完整（builtAt 为零或 entries 为 null）一律报错交回让路同步兜底，
+// 绝不产出可疑缓存。调用方持锁。
+func readProtocolDirSnapshotLocked() ([]ProtocolDirEntry, time.Time, error) {
+	path := protocolDirSnapshotPathFn()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	var f protocolDirSnapshotFile
+	if err := sonic.Unmarshal(raw, &f); err != nil {
+		return nil, time.Time{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if f.BuiltAt.IsZero() {
+		return nil, time.Time{}, fmt.Errorf("snapshot %s has zero builtAt", path)
+	}
+	if f.Entries == nil {
+		return nil, time.Time{}, fmt.Errorf("snapshot %s has nil entries", path)
+	}
+	return f.Entries, f.BuiltAt, nil
+}
+
+// LoadProtocolDirSnapshotBoot 进程启动时装入最近一份可用盘上快照作为初始
+// 缓存并启动后台提前重建探测——重启后首个公网请求立即命中快照应答（SWR
+// 语义照旧：若快照年龄已逾 TTL/快照过期，该请求只触发后台重建、不等重建）。
+// 在 InitRuntime 装库之后调用（依赖 PebbleStore 就位）。缓存已有快照
+// /路径缝为 nil（测试）/没有可读快照时静默退出，不改变任何既有语义。
+func LoadProtocolDirSnapshotBoot() {
+	protocolDirCache.Lock()
+	defer protocolDirCache.Unlock()
+	if protocolDirCache.entries != nil || protocolDirSnapshotPathFn == nil {
+		return
+	}
+	entries, builtAt, err := readProtocolDirSnapshotLocked()
+	if err != nil {
+		log.Printf("[ProtocolDir] boot: no usable on-disk snapshot (%v) — first request falls back to sync build", err)
+		return
+	}
+	protocolDirCache.entries = entries
+	protocolDirCache.builtAt = builtAt
+	log.Printf("[ProtocolDir] boot: loaded on-disk snapshot builtAt=%d entries=%d", builtAt.Unix(), len(entries))
+	startProtocolDirProberLocked(PebbleStore)
+}
+
 // protocolDirBuildFn 快照构建的替换缝：同步兜底与后台重建都经由它，
 // 测试可注入慢/失败构建来验证不阻塞与降级语义。
 var protocolDirBuildFn = (*PebbleData).BuildProtocolDirectory
@@ -124,7 +230,14 @@ const protocolDirCacheTTL = 10 * time.Minute
 // 快照过期或 force=true（API 的 refresh=1）只触发一次后台重建，请求
 // 绝不等重建（生产全量扫描 46–60s，同步重建曾撞 nginx 60s 代理线）；
 // 仅无快照（进程刚起、后台刷新持续失败）时同步构建兜底（允许慢，不允许死）。
-// builtAt 语义保持原样：返回快照的构建时刻（过期快照即其为旧时刻）。
+//
+// builtAt 语义（含持久化取舍）：返回快照的构建时刻。命中盘上持久化快照时
+// 返回的是该快照的【原构建时刻】（写入盘上文件并回读，不做人为拨前）——
+// 这样 API 侧 builtAt.Unix() 输出的时间线与"这份数据何时算齐"仍严格一致
+// （取向："说老实话"：它是旧数据，时戳就该是旧的），代价是该快照年龄很可能
+// 已逾 TTL，首个请求按 SWR 语义立即触发一次后台重建（不等重建，只应答旧
+// 数据）；重建成功后落盘换新，次轮请求自然切回最新。缓存与盘上快照的
+// builtAt 同源同值，接口契约零变化。
 func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Time, error) {
 	protocolDirCache.Lock()
 	defer protocolDirCache.Unlock()
@@ -138,8 +251,9 @@ func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Ti
 	if err != nil {
 		return nil, protocolDirCache.builtAt, err
 	}
-	protocolDirCache.entries = entries
 	protocolDirCache.builtAt = time.Now()
+	protocolDirCache.entries = entries
+	persistProtocolDirSnapshotLocked(entries, protocolDirCache.builtAt)
 	startProtocolDirProberLocked(pd)
 	return protocolDirCache.entries, protocolDirCache.builtAt, nil
 }
@@ -160,8 +274,9 @@ func startProtocolDirRebuildLocked(pd *PebbleData) {
 		if err != nil || entries == nil {
 			return
 		}
-		protocolDirCache.entries = entries
 		protocolDirCache.builtAt = time.Now()
+		protocolDirCache.entries = entries
+		persistProtocolDirSnapshotLocked(entries, protocolDirCache.builtAt)
 	}()
 }
 
@@ -201,7 +316,8 @@ func startProtocolDirProberLocked(pd *PebbleData) {
 // ResetProtocolDirCacheForTest 测试专用：清空目录快照缓存并停掉后台探测，
 // 再等在飞后台重建结束——防止跨测试用例的库存活污染，以及测试收尾
 // db.Close() 与在飞全量扫描相撞（panic: pebble: closed）。生产代码勿调用，
-// 生产库与进程同生命周期，无需重置。
+// 生产库与进程同生命周期，无需重置。快照落盘路径缝一并归禁用态（测试
+// 默认不写盘；需要持久化的用例自行注入 t.TempDir 路径）。
 func ResetProtocolDirCacheForTest() {
 	// 1) 停后台探测（探测只会再触发新重建）
 	protocolDirCache.Lock()
@@ -221,11 +337,12 @@ func ResetProtocolDirCacheForTest() {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	// 3) 清空快照缓存与后台状态
+	// 3) 清空快照缓存与后台状态，快照落盘路径缝归禁用态
 	protocolDirCache.Lock()
 	protocolDirCache.entries = nil
 	protocolDirCache.builtAt = time.Time{}
 	protocolDirCache.proberStarted = false
+	protocolDirSnapshotPathFn = nil
 	protocolDirCache.Unlock()
 }
 

@@ -63,6 +63,7 @@ func InitAdapter(chainType, dbType, test, server string) {
 func InitRuntime(chainType, dbType, test, server string, enableChain bool) {
 	PebbleStore = &PebbleData{}
 	PebbleStore.Init(common.Config.Pebble.Num)
+	LoadProtocolDirSnapshotBoot() // 装最近一份盘上协议目录快照，重启后首请求免同步冷重建
 	common.Chain = chainType
 	ChainAdapter = make(map[string]adapter.Chain)
 	ChainParams = make(map[string]string)
