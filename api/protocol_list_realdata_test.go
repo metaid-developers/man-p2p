@@ -75,7 +75,11 @@ func TestProtocolListRealManapiFixture(t *testing.T) {
 	}
 	man.PebbleStore = &man.PebbleData{Database: db}
 	common.Config = &common.AllConfig{}
+	// 目录快照是 man 包级缓存：开测前清空防污染、收尾先清空再关库防与在飞重建相撞
+	man.ResetProtocolDirCacheForTest()
+	t.Cleanup(man.ResetProtocolDirCacheForTest)
 	t.Cleanup(func() {
+		man.ResetProtocolDirCacheForTest()
 		_ = db.Close()
 		man.PebbleStore = origStore
 		common.Config = origConfig

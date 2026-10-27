@@ -19,7 +19,9 @@ import (
 // 分页遵循 /api/pin/list 惯例：page 从 1 起、size 默认 20 上限 200；
 // 排序遵循 parseSortParams（sortBy + order），sortBy 支持
 // path/pinTotal/firstTimestamp/firstHeight/firstTxid，未显式传 order 时默认升序
-// （目录默认按 path 字母序）。目录快照带 10 分钟内存缓存，refresh=1 强制重建。
+// （目录默认按 path 字母序）。快照走 stale-while-revalidate：有过往快照即即时
+// 应答；过期或 refresh=1 只触发后台重建（请求绝不等重建——生产全量扫描
+// 46–60s，同步重建曾撞 nginx 60s 代理线 504）。
 func protocolList(ctx *gin.Context) {
 	page, err := strconv.ParseInt(ctx.Query("page"), 10, 64)
 	if err != nil || page < 1 {

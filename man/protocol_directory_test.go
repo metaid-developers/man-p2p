@@ -148,6 +148,7 @@ func TestBuildProtocolDirectoryEmpty(t *testing.T) {
 }
 
 func TestProtocolDirectoryCache(t *testing.T) {
+	swrResetCache(t)
 	pd := setupProtocolDirStore(t)
 	ingestProtocolPin(t, fmt.Sprintf("f%063di0", 1), "/protocols/cacheproto", 191000, 1793000000, "1AxUdSkVdDyDreYSYVoDRFeyS1pvQdvcJx", "idq1d5m392ahkhp79wsy9ur79e3vhak7tg729dwdr5", 0, nil)
 
@@ -164,8 +165,21 @@ func TestProtocolDirectoryCache(t *testing.T) {
 	if cached[0].PinTotal != 1 {
 		t.Fatalf("cached pinTotal = %d, want 1", cached[0].PinTotal)
 	}
-	forced, _, err := pd.ProtocolDirectory(true)
-	if err != nil || len(forced) != 1 || forced[0].PinTotal != 2 {
-		t.Fatalf("forced rebuild should see new pin: n=%d total=%d err=%v", len(forced), forced[0].PinTotal, err)
+	// refresh=1（force）不再同步重建：立即返回旧快照，后台重建随后换新
+	// （旧行为把 46–60s 全量扫描钳在请求路径上，生产曾撞 nginx 60s 超时 504）
+	_, builtAt3, err := pd.ProtocolDirectory(true)
+	if err != nil || !builtAt3.Equal(builtAt1) {
+		t.Fatalf("refresh=1 must serve the cached snapshot unchanged: builtAt=%v want=%v err=%v", builtAt3, builtAt1, err)
+	}
+	swrWaitRebuildLanded(t, builtAt3)
+	refetched, _, err := pd.ProtocolDirectory(false)
+	if err != nil || len(refetched) != 1 || refetched[0].PinTotal != 2 {
+		t.Fatalf("background rebuild should see the new pin: n=%d total=%d err=%v",
+			len(refetched), func() int64 {
+				if len(refetched) == 0 {
+					return -1
+				}
+				return refetched[0].PinTotal
+			}(), err)
 	}
 }
