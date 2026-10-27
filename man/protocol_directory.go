@@ -96,7 +96,17 @@ var protocolDirCache struct {
 	sync.Mutex
 	entries []ProtocolDirEntry
 	builtAt time.Time
+	// 以下为 stale-while-revalidate 生命周期状态：
+	// rebuilding 一次后台重建在跑（触发防重入）；
+	// proberStarted/proberStop 后台提前重建探测（进程生命周期一次，test-only 重置）。
+	rebuilding    bool
+	proberStarted bool
+	proberStop    chan struct{}
 }
+
+// protocolDirBuildFn 快照构建的替换缝：同步兜底与后台重建都经由它，
+// 测试可注入慢/失败构建来验证不阻塞与降级语义。
+var protocolDirBuildFn = (*PebbleData).BuildProtocolDirectory
 
 // protocolDirCacheTTL 目录快照缓存时长；全量扫描代价高，避免逐请求重建。
 const protocolDirCacheTTL = 10 * time.Minute
@@ -109,7 +119,7 @@ func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Ti
 	if !force && protocolDirCache.entries != nil && time.Since(protocolDirCache.builtAt) < protocolDirCacheTTL {
 		return protocolDirCache.entries, protocolDirCache.builtAt, nil
 	}
-	entries, err := pd.BuildProtocolDirectory()
+	entries, err := protocolDirBuildFn(pd)
 	if err != nil {
 		return nil, protocolDirCache.builtAt, err
 	}
