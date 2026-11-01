@@ -45,6 +45,7 @@ type Database struct {
 	MetaidInfoDB  *pebble.DB // 用于存储metaid信息
 	MetaDb        *pebble.DB // 用于存储meta数据
 	TransferDb    *pebble.DB // 用于存储转移数据
+	Mrc721Db      *pebble.DB // 用于存储mrc721聚合数据(collection/item/owner/transfer/pending)
 }
 type customLogger struct{}
 
@@ -158,9 +159,15 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 		log.Println(err)
 		return nil, err
 	}
+	os.MkdirAll(fmt.Sprintf("%s/mrc721", basePath), 0755)
+	mrc721Db, err := pebble.Open(fmt.Sprintf("%s/mrc721/db", basePath), dbOptions)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
 	return &Database{PinsDBs: pinsDBs, PinSort: pinSortDb, BlocksDB: blocksDB,
 		CountDB: countDB, PinAliasDb: pinAliasDb, PathPinDB: pathPinDB, AddressDB: addressDB,
-		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb}, nil
+		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb, Mrc721Db: mrc721Db}, nil
 }
 
 // Close 关闭所有数据库

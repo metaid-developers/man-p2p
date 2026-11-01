@@ -102,6 +102,11 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 		pd.handleMrc20(chainName, height, pinList, txInList)
 	}
 
+	// 处理 MRC721(collection/item 聚合)
+	if Mrc721RuntimeEnabled() {
+		pd.handleMrc721(chainName, height, *pinList)
+	}
+
 	pinList = nil
 	txInList = nil
 	if FirstCompleted {
