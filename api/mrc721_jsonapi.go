@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"man-p2p/api/respond"
 	"man-p2p/man"
@@ -26,6 +27,8 @@ func mrc721JsonApi(r *gin.Engine) {
 	group.GET("/item/info", mrc721ItemInfo)
 	group.GET("/item/transfers", mrc721ItemTransfers)
 	group.GET("/item/verify", mrc721ItemVerify)
+	// 定向重放存量协议 pin 补聚合(O(1) 取本地 pin 重过钩子,幂等;只读本地已有 pin,不做扫描)
+	group.GET("/admin/replay-pins", mrc721AdminReplayPins)
 }
 
 func mrc721DB() *pebblestore.Database {
@@ -81,6 +84,8 @@ func mrc721CollectionDTO(col *pebblestore.Mrc721Collection) gin.H {
 		"createtime":       col.CreateTime,
 		"createTime":       col.CreateTime,
 		"totalnum":         col.TotalNum,
+		"modifyHistory":    col.ModifyHistory,
+		"modify_history":   col.ModifyHistory,
 		"chainName":        col.GenesisChainName,
 		"genesisChainName": col.GenesisChainName,
 		"genesisHeight":    col.GenesisHeight,
@@ -122,6 +127,27 @@ func mrc721ItemDTO(item *pebblestore.Mrc721Item) gin.H {
 		"genesisHeight":    item.GenesisHeight,
 		"genesisTx":        item.GenesisTx,
 	}
+}
+
+func mrc721AdminReplayPins(ctx *gin.Context) {
+	if man.PebbleStore == nil {
+		ctx.JSON(http.StatusOK, respond.ErrServiceError)
+		return
+	}
+	var ids []string
+	for _, id := range strings.Split(ctx.Query("pinIds"), ",") {
+		if strings.TrimSpace(id) != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
+		return
+	}
+	if len(ids) > 100 {
+		ids = ids[:100]
+	}
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"results": man.PebbleStore.Mrc721ReplayPins(ids)}))
 }
 
 func mrc721CollectionPageList(ctx *gin.Context) {

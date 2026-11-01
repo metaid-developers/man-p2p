@@ -46,6 +46,9 @@ type Mrc721Collection struct {
 	GenesisHeight    int64  `json:"genesisHeight"`
 	GenesisTx        string `json:"genesisTx"`
 	TotalNum         int64  `json:"totalnum"`
+	// ModifyHistory 发行方 collection_desc modify 的版本链:modify pinId 按 ingest 顺序追加,
+	// 最后一个即当前生效版本;同一 pinId 幂等不重复。
+	ModifyHistory []string `json:"modifyHistory,omitempty"`
 }
 
 type Mrc721Item struct {
@@ -92,12 +95,13 @@ type Mrc721ItemDescRef struct {
 	Metadata string `json:"metadata"`
 }
 
-// Mrc721PendingEntry 乱序暂存:collection 尚未注册时的 mint/item_desc。
+// Mrc721PendingEntry 乱序暂存:collection 尚未注册时的 mint/item_desc/colmod。
 type Mrc721PendingEntry struct {
-	Kind  string             `json:"kind"` // "mint" | "desc"
-	PinId string             `json:"pinId"`
-	Mint  *Mrc721PendingMint `json:"mint,omitempty"`
-	Desc  *Mrc721PendingDesc `json:"desc,omitempty"`
+	Kind   string               `json:"kind"` // "mint" | "desc" | "colmod"
+	PinId  string               `json:"pinId"`
+	Mint   *Mrc721PendingMint   `json:"mint,omitempty"`
+	Desc   *Mrc721PendingDesc   `json:"desc,omitempty"`
+	ColMod *Mrc721PendingColMod `json:"colmod,omitempty"`
 }
 
 // Mrc721PendingMint mint 暂存:足以重建 item 的字段。
@@ -120,6 +124,14 @@ type Mrc721PendingMint struct {
 type Mrc721PendingDesc struct {
 	DescPinId string              `json:"descPinId"`
 	Items     []Mrc721ItemDescRef `json:"items"`
+}
+
+// Mrc721PendingColMod collection_desc modify 暂存:专辑注册后按时间序回放。
+type Mrc721PendingColMod struct {
+	ModifyPinId   string `json:"modifyPinId"`
+	ModifyAddress string `json:"modifyAddress"`
+	Content       string `json:"content"` // 原始 modify JSON
+	Timestamp     int64  `json:"timestamp"`
 }
 
 func mrc721CollItemKey(collectionName string, seq int64, itemPinId string) string {

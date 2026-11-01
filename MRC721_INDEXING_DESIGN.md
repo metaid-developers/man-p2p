@@ -26,7 +26,7 @@
 | 专辑描述 | `/nft/mrc721/{collection_name}/collection_desc` | 专辑注册;`collectionid` = 该 pin 的 pinid;**首个生效,后续同名忽略** |
 | 条目描述 | `/nft/mrc721/{collection_name}/item_desc` | 可选、可多条;对同一 itemPinId **首条生效**;引用不存在条目自然忽略 |
 
-约束:仅接受 `operation=create`;`modify/revoke/hide` 在 `/nft/mrc721` 下不生效。collection_name 建议**不含 `/`**(路径按 `/` 切分)。
+约束:`create` 全路径生效;`modify` **仅 collection_desc 生效**(发行方专属版本链,2026-11-02 修订:IDBots `mrc721_collection_update` 已上线,内容为当前字段全量 JSON 键大小写不敏感;发行方 Address 校验、modify pinId 幂等入 `modifyHistory`、最后一条生效;totalSupply/royaltyRate 若出现按同范围校验,降 totalSupply 不回撤已收录条目只收后续 mint 闸门;专辑未注册时按 pending `colmod` 暂存、注册后按时间序回放);item 路径 modify 与 revoke/hide 在 /nft/mrc721 下不生效。collection_name 建议**不含 `/`**(路径按 `/` 切分)。存量 pin(先于功能部署落链)经 `GET /api/mrc721/admin/replay-pins?pinIds=` 定向补聚合(O(1) 取本地 pin 重过钩子,幂等)。
 
 ### 2.2 collection_desc JSON
 

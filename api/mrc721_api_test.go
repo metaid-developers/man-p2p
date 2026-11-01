@@ -55,6 +55,7 @@ func mrc721Seed(t *testing.T, db *pebblestore.Database) {
 		GenesisHeight:    100,
 		GenesisTx:        "tx-coll",
 		TotalNum:         2,
+		ModifyHistory:    []string{"seed-mod-pin"},
 	}
 	if err := db.SaveMrc721Collection(col); err != nil {
 		t.Fatalf("seed collection: %v", err)
@@ -156,6 +157,14 @@ func TestMrc721CollectionPageList(t *testing.T) {
 	// camelCase 别名(IDBots 契约)
 	if item["collectionName"] != "SeedAlbum" || item["totalSupply"] != float64(10) || item["royaltyRate"] != float64(5) || item["createAddress"] != "addr-creator" || item["createTime"] != float64(1700000000) || item["genesisChainName"] != "mvc" {
 		t.Fatalf("collection camelCase aliases wrong: %v", item)
+	}
+	// modifyHistory 版本链(两种 key 别名)
+	history, ok := item["modifyHistory"].([]interface{})
+	if !ok || len(history) != 1 || history[0] != "seed-mod-pin" {
+		t.Fatalf("modifyHistory wrong: %v", item["modifyHistory"])
+	}
+	if alias, ok := item["modify_history"].([]interface{}); !ok || len(alias) != 1 {
+		t.Fatalf("modify_history alias wrong: %v", item["modify_history"])
 	}
 }
 

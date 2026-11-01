@@ -3,6 +3,7 @@ package man
 import (
 	"encoding/json"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -27,9 +28,11 @@ func Mrc721RuntimeEnabled() bool {
 }
 
 // handleMrc721 在 pin 入库后按路径分派 MRC-721 协议动作(DoIndexerRun 区块路径调用)。
+// operation 语义:仅 collection_desc 放开 modify(发行方专属,版本链);其余路径只认 create;
+// revoke/hide 在 /nft/mrc721 下不生效。
 func (pd *PebbleData) handleMrc721(chainName string, height int64, pinList []*pin.PinInscription) {
 	for _, pinNode := range pinList {
-		if pinNode.Operation != "create" || len(pinNode.Id) == 0 {
+		if len(pinNode.Id) == 0 {
 			continue
 		}
 		if !strings.HasPrefix(strings.ToLower(pinNode.Path), mrc721PathPrefix) {
@@ -47,11 +50,20 @@ func (pd *PebbleData) handleMrc721(chainName string, height int64, pinList []*pi
 		}
 		switch op {
 		case "collection_desc":
-			pd.mrc721CollectionHandle(collectionName, pinNode)
+			switch pinNode.Operation {
+			case "create":
+				pd.mrc721CollectionHandle(collectionName, pinNode)
+			case "modify":
+				pd.mrc721CollectionModifyHandle(collectionName, pinNode)
+			}
 		case "item_desc":
-			pd.mrc721ItemDescHandle(collectionName, pinNode)
+			if pinNode.Operation == "create" {
+				pd.mrc721ItemDescHandle(collectionName, pinNode)
+			}
 		default:
-			pd.mrc721MintHandle(collectionName, pinNode)
+			if pinNode.Operation == "create" {
+				pd.mrc721MintHandle(collectionName, pinNode)
+			}
 		}
 	}
 }
@@ -117,8 +129,130 @@ func (pd *PebbleData) mrc721CollectionHandle(collectionName string, pinNode *pin
 		log.Printf("[MRC721] save collection %s: %v", collectionName, err)
 		return
 	}
-	// 注册成功,回放乱序暂存(mint 先入账,desc 后回填)
+	// 注册成功,回放乱序暂存(mint 先入账,desc 后回填,colmod 最后按时间序生效)
 	pd.mrc721DrainPending(collectionName)
+}
+
+// ---------- collection_desc modify(发行方专属版本链) ----------
+
+func (pd *PebbleData) mrc721CollectionModifyHandle(collectionName string, pinNode *pin.PinInscription) {
+	col, err := pd.Database.GetMrc721CollectionByName(collectionName)
+	if err != nil {
+		log.Printf("[MRC721] get collection %s: %v", collectionName, err)
+		return
+	}
+	if col == nil {
+		// 专辑未注册:暂存,注册后按时间序回放
+		pd.Database.PutMrc721Pending(collectionName, &pebblestore.Mrc721PendingEntry{
+			Kind: "colmod", PinId: pinNode.Id,
+			ColMod: &pebblestore.Mrc721PendingColMod{
+				ModifyPinId:   pinNode.Id,
+				ModifyAddress: pinNode.Address,
+				Content:       string(pinNode.ContentBody),
+				Timestamp:     pinNode.Timestamp,
+			},
+		})
+		return
+	}
+	pd.mrc721CollectionModifyCommit(collectionName, col, pinNode.Id, pinNode.Address, pinNode.ContentBody)
+}
+
+// mrc721CollectionModifyCommit 应用一笔 collection_desc modify:
+// 发行方专属;同一 modify pinId 幂等;展示字段全量覆盖,totalSupply/royaltyRate
+// 若出现则按同范围校验(非法整条忽略);降 totalSupply 不回撤已收录条目,只收后续 mint 闸门。
+func (pd *PebbleData) mrc721CollectionModifyCommit(collectionName string, col *pebblestore.Mrc721Collection, modifyPinId, modifyAddress string, contentBody []byte) bool {
+	if modifyAddress != col.CreateAddress {
+		log.Printf("[MRC721] collection modify %s rejected: %s is not issuer of %s (%s)", modifyPinId, modifyAddress, collectionName, col.CreateAddress)
+		return false
+	}
+	for _, id := range col.ModifyHistory {
+		if id == modifyPinId {
+			return true // 幂等:双路径重复投递/回放不重复入链
+		}
+	}
+	content, err := mrc721ParseContent(contentBody)
+	if err != nil {
+		log.Printf("[MRC721] collection modify %s invalid content: %v", modifyPinId, err)
+		return false
+	}
+	newTotalSupply := col.TotalSupply
+	if raw, ok := mrc721LookupCI(content, "totalsupply"); ok {
+		v, err := mrc721ParseInt64(raw)
+		if err != nil {
+			log.Printf("[MRC721] collection modify %s invalid totalSupply: %v", modifyPinId, err)
+			return false
+		}
+		newTotalSupply = v
+	}
+	newRoyaltyRate := col.RoyaltyRate
+	if raw, ok := mrc721LookupCI(content, "royaltyrate"); ok {
+		v, err := mrc721ParseInt64(raw)
+		if err != nil {
+			log.Printf("[MRC721] collection modify %s invalid royaltyRate: %v", modifyPinId, err)
+			return false
+		}
+		newRoyaltyRate = int(v)
+	}
+	if newTotalSupply < -1 || newTotalSupply > 1000000000000 {
+		log.Printf("[MRC721] collection modify %s totalSupply out of range: %d", modifyPinId, newTotalSupply)
+		return false
+	}
+	if newRoyaltyRate < 0 || newRoyaltyRate > 20 {
+		log.Printf("[MRC721] collection modify %s royaltyRate out of range: %d", modifyPinId, newRoyaltyRate)
+		return false
+	}
+	if _, ok := mrc721LookupCI(content, "name"); ok {
+		col.Name = mrc721StringField(content, "name")
+	}
+	if _, ok := mrc721LookupCI(content, "desc"); ok {
+		col.Desc = mrc721StringField(content, "desc")
+	}
+	if _, ok := mrc721LookupCI(content, "website"); ok {
+		col.Website = mrc721StringField(content, "website")
+	}
+	if _, ok := mrc721LookupCI(content, "cover"); ok {
+		col.Cover = mrc721StringField(content, "cover")
+	}
+	if _, ok := mrc721LookupCI(content, "metadata"); ok {
+		col.Metadata = mrc721StringField(content, "metadata")
+	}
+	col.TotalSupply = newTotalSupply
+	col.RoyaltyRate = newRoyaltyRate
+	col.ModifyHistory = append(col.ModifyHistory, modifyPinId)
+	if err := pd.Database.SaveMrc721Collection(col); err != nil {
+		log.Printf("[MRC721] save collection %s modify: %v", collectionName, err)
+		return false
+	}
+	return true
+}
+
+// Mrc721ReplayResult 定向重放的单 pin 结果。
+type Mrc721ReplayResult struct {
+	PinId   string `json:"pinId"`
+	Chain   string `json:"chain,omitempty"`
+	Applied bool   `json:"applied"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// Mrc721ReplayPins 定向重放:按 pinId 从本地 pin 主记录取存量 pin 重过聚合钩子
+// (O(1) 查找,不做扫描;幂等由 mintCommit/modify history/transfer 去重保证)。
+// 供 api admin 端点对"先于功能部署落链"的存量协议 pin 补聚合。
+func (pd *PebbleData) Mrc721ReplayPins(pinIds []string) []Mrc721ReplayResult {
+	results := make([]Mrc721ReplayResult, 0, len(pinIds))
+	for _, id := range pinIds {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		pinNode, err := pd.GetPinById(id)
+		if err != nil || pinNode.Id == "" {
+			results = append(results, Mrc721ReplayResult{PinId: id, Applied: false, Reason: "pin not found"})
+			continue
+		}
+		pd.handleMrc721(pinNode.ChainName, pinNode.GenesisHeight, []*pin.PinInscription{&pinNode})
+		results = append(results, Mrc721ReplayResult{PinId: id, Chain: pinNode.ChainName, Applied: true})
+	}
+	return results
 }
 
 // ---------- item_desc ----------
@@ -349,7 +483,7 @@ func (pd *PebbleData) mrc721TransferHook(chainName string, height int64, transfe
 
 // ---------- pending 回放 ----------
 
-// mrc721DrainPending 专辑注册后回放全部暂存:mint 先入账,desc 后回填。
+// mrc721DrainPending 专辑注册后回放全部暂存:mint 先入账,desc 后回填,colmod 最后按时间序生效。
 func (pd *PebbleData) mrc721DrainPending(collectionName string) {
 	col, err := pd.Database.GetMrc721CollectionByName(collectionName)
 	if err != nil || col == nil {
@@ -364,16 +498,36 @@ func (pd *PebbleData) mrc721DrainPending(collectionName string) {
 		return
 	}
 	var descs []*pebblestore.Mrc721PendingEntry
+	var colMods []*pebblestore.Mrc721PendingEntry
 	for _, entry := range entries {
-		if entry.Kind == "mint" && entry.Mint != nil {
+		switch {
+		case entry.Kind == "mint" && entry.Mint != nil:
 			pd.mrc721MintCommit(collectionName, col, entry.Mint)
-		} else if entry.Kind == "desc" {
+		case entry.Kind == "desc":
 			descs = append(descs, entry)
+		case entry.Kind == "colmod" && entry.ColMod != nil:
+			colMods = append(colMods, entry)
 		}
 	}
 	// desc 回填可能引用回放 mint 的新条目,故在 mint 之后处理
 	for _, entry := range descs {
 		pd.mrc721DrainOneDesc(collectionName, entry)
+	}
+	// colmod 按 (timestamp, pinId) 时间序回放,最后一条生效
+	sort.Slice(colMods, func(i, j int) bool {
+		a, b := colMods[i].ColMod, colMods[j].ColMod
+		if a.Timestamp != b.Timestamp {
+			return a.Timestamp < b.Timestamp
+		}
+		return a.ModifyPinId < b.ModifyPinId
+	})
+	for _, entry := range colMods {
+		m := entry.ColMod
+		col, err := pd.Database.GetMrc721CollectionByName(collectionName)
+		if err != nil || col == nil {
+			return
+		}
+		pd.mrc721CollectionModifyCommit(collectionName, col, m.ModifyPinId, m.ModifyAddress, []byte(m.Content))
 	}
 }
 
