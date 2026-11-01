@@ -54,12 +54,12 @@
 - 行为:钱包按该 outpoint 构建转移交易并广播;完成后轮询 `item/info` 的 owner 变化 + `item/transfers` 新增记录。
 - 注意:同一 output 的找零/合并需避免把 NFT UTXO 当普通零钱花掉——钱包 UTXO 管理须将 NFT 所在 outpoint 标记为"资产 UTXO"(依赖 `item/info` 与 `address/item` 的持仓清单)。
 
-### R4 交易(PSBT,建议 V1.1)
+### R4 交易(模型见 §5.1,建议 V1.1 走 A、V2 升级 C)
 
 - 模式(对齐现有 MRC20/服务订单基建的形态,由 IDBots 侧定稿):
   1. 卖方挂单:指定 NFT(pinId)与要价;托管/撮合的订单态由 IDBots 侧存储(现有 sqliteStore/orderPayment 模式)。
-  2. 成交构建:卖方以 NFT 当前 outpoint 为输入构建 PSBT(非最终签名),输出含买方得 NFT、卖方收款(含可选 royalty 输出,比例取 `collection/info.royaltyRate`)。
-  3. 签名流转:买方/卖方经钱包签名。BTC 复用现有 `/api/idbots/wallet/btc/sign-psbt` RPC(`metaidRpcServer.ts` 已有,SIGN_PSBT 模式)。
+  2. 成交构建:卖方以 NFT 当前 outpoint 为输入构建交易,输出含买方得 NFT、卖方收款(含可选 royalty 输出,比例取 `collection/info.royaltyRate`)。模型 A 下为卖家单方签名转移;模型 C 下为部分签名交易(PSBT/TxComposer 装配),买卖双方各签后广播。
+  3. 签名流转:BTC 复用现有 `/api/idbots/wallet/btc/sign-psbt` RPC(`metaidRpcServer.ts` 已有,SIGN_PSBT 模式);MVC 侧模型 A 仅需普通转移(现有 `executeTransfer` + 强制 outpoint 参数),模型 C 需新增 TxComposer 部分签名端点(§5.1)。
   4. 广播与确认:广播后以 `item/info` owner 变化 + `item/transfers` 为最终交割依据(索引即权威)。
 - man-p2p 在交易中的职责边界:**只读数据源**(outpoint、归属、历史、royaltyRate);订单、撮合、托管、纠纷不在索引层。
 
@@ -70,21 +70,31 @@
 - 详情页:NFT 当前归属、发行者、genesis(链/高度/tx)、转移时间线(`item/transfers`)、真伪事实(`item/verify`:已收录 + creatorMinted + collectionid)。
 - 身份展示:优先展示 MetaID(globalMetaId),链地址为辅。
 
-## 4. IDBots 侧技术落点(现状参考)
+## 4. IDBots 侧技术落点(现状核查 2026-11-01)
 
-- 已具备:man-p2p 二进制嵌入与本地 HTTP 调用(`npm run sync:man-p2p`);BTC PSBT 签名 RPC(`/api/idbots/wallet/btc/sign-psbt`);MRC20 订单/支付/观察者会话等交易基建(orderPayment、buyerOrderObserverSession、metabotTokenTransferService)。
-- 需新增:MRC721 pin 构造器(collection_desc/item/mint)、NFT UTXO 标记与选择、挂单/成交流程、NFT UI(广场/详情/我的)。
+- 已具备:
+  - man-p2p 二进制嵌入与本地 HTTP 调用(`npm run sync:man-p2p`);BTC PSBT 签名 RPC(`/api/idbots/wallet/btc/sign-psbt`);MRC20 订单/支付/观察者会话等交易基建(orderPayment、buyerOrderObserverSession、metabotTokenTransferService)。
+  - MVC 转账执行与 raw-tx 构建链:`executeTransfer`、`BUILD_MVC_TRANSFER_RAW_TX`、`BUILD_MVC_FT_TRANSFER_RAW_TX`、`BUILD_MVC_RAW_TX_BUNDLE`(walletRawTxService + workers)。
+  - MVC **合约系 NFT 全栈**(`mvcNftService` + `buildMvcNft*Worker`,meta-contract `NftManager`):余额、转移、挂卖/购买/撤单(两段式交易)。注意其对象是**合约系 NFT**(genesis/codehash/tokenIndex,sensibleId,metalet.space 数据源),与 MRC-721(pin 系)是**并存的两套协议**,不通用。
+- 需新增(IDBots 侧):
+  1. MRC-721 pin 构造器(collection_desc / item mint / item_desc)。
+  2. **raw-tx 构建器的"强制花费指定 outpoint"能力**:现有构建器只支持 `exclude_outpoints`,无法指定输入;MRC-721 转移 = 花费 NFT pin 所在 output,必须支持 `include_outpoints`(或专用 `buildMvc721TransferRawTx`)。这是转移(R3)与交易(R4)共同的前置。
+  3. 挂单/成交流程与 NFT UI(广场/详情/我的)。
 
-## 5. 待确认(阻塞项 → 需 IDBots 侧拍板)
+## 5. 待确认(IDBots 侧拍板项)
 
-1. **MVC 的 PSBT 等价签名 RPC**:现有 sign-psbt 仅 BTC;MVC(UTXO 链)需要等价的"构建部分签名交易 + 钱包签名"能力,确认 metalet/MetaBot 钱包是否已有可复用的 MVC 签名通道。
-2. **挂单/订单存储与撮合**:本地 sqlite 是否够用;跨设备发现是否需要云端目录(不进 man-p2p 索引层)。
-3. **royalty 结算**:V1 仅登记与展示 royaltyRate,分账输出是否进 V1.1 的 PSBT 模板。
-4. **双链资产展示**:BTC 与 MVC 的 NFT 同列表混排(按 genesisChainName 过滤器)还是分页签,由 UI 定。
+1. **MRC-721 交易结算模型**(三选一或分期,替代原"MVC PSBT 签名通道"疑问——签名/构建基建经核查已存在,缺的是模型选择与一个 outpoint 参数):
+   - A. 订单托管式(推荐 V1.1):买家付款 → 卖家转移 NFT(outpoint 强制花费);信任由订单/托管逻辑承担(复用现有 orderPayment 模式)。改动最小,纯钱包既有能力 + 第 2 项新参数。
+   - B. 合约挂单式:仿现有合约系 NFT 的 sell/buy,但需把 pin-NFT 适配进 NftManager 两段式合约流程,工作量大、收益不明显,不建议 V1.1。
+   - C. 原子交换式(V2 候选,真 PSBT 语义):一笔交易同时含买家付款输入与卖家 NFT 输入,双方签名后广播。BTC 已有 sign-psbt 可做;MVC 的 meta-contract `TxComposer` 支持部分签名装配,但现有 RPC 未暴露——需新增"部分签名组装/外部签名回填"端点。MRC-721 转移是普通 UTXO 花费,单笔原子交换无需合约,技术上顺理成章。
+2. **合约系 NFT 与 MRC-721 并存展示**:钱包资产页两套 NFT(合约系已有持仓 vs MRC-721 pin 系)合并展示还是分栏,由 UI 定。
+3. 挂单/订单存储与撮合:本地 sqlite 是否够用;跨设备发现是否需要云端目录(不进 man-p2p 索引层)。
+4. royalty 结算:V1 仅登记与展示 royaltyRate,分账输出是否进交易 PSBT/模板。
+5. 双链资产展示:BTC 与 MVC 的 NFT 同列表混排(按 genesisChainName 过滤)还是分页签,由 UI 定。
 
 ## 6. 验收标准(V1)
 
 1. MetaBot 内完成:发行专辑 → mint ≥2 个 NFT(其一后补 item_desc)→ 转移给另一地址,全程 MVC;BTC 侧以回填数据做只读验收。
 2. 全程无需外部服务:所有查询命中本地 man-p2p(peerless 亦可用)。
 3. 详情页正确展示:当前归属、完整转移路径、发行者、真伪标识(含一个第三方铸造样例展示"第三方铸造"标识)。
-4. 交易(若 V1.1 同期):PSBT 流程闭环,交割以 `item/transfers` 为准。
+4. 交易(若 V1.1 同期,模型 A):挂单 → 付款 → 卖家转移 NFT → `item/transfers` 确认交割,流程闭环。
