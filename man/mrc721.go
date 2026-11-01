@@ -283,6 +283,62 @@ func (pd *PebbleData) mrc721MintCommit(collectionName string, col *pebblestore.M
 	return true
 }
 
+// ---------- transfer ----------
+
+// mrc721TransferHook 消费 pin 转移检测结果(handleTransfer 调用),更新条目归属、
+// 持有人索引换 key、追加转移历史。transferMap 的 key 为 "txid:index" 输出串,
+// pinIdByOutput 由 handleTransfer 从待检 pin 记录构建(key → pin.Id)。
+func (pd *PebbleData) mrc721TransferHook(chainName string, height int64, transferMap map[string]*pin.PinTransferInfo, pinIdByOutput map[string]string, transferTime int64) {
+	for output, info := range transferMap {
+		pinId := pinIdByOutput[output]
+		if pinId == "" {
+			continue
+		}
+		item, err := pd.Database.GetMrc721Item(pinId)
+		if err != nil {
+			log.Printf("[MRC721] get item %s: %v", pinId, err)
+			continue
+		}
+		if item == nil {
+			continue // 非 MRC-721 条目
+		}
+		if info.IsMeltdown || info.Address == "" {
+			// 熔化:标记 burned,移出持有人视图,记录保留可溯源
+			item.Burned = true
+			if item.OwnerAddress != "" {
+				pd.Database.DeleteMrc721OwnerItem(item.OwnerAddress, item.CollectionName, item.ItemPinId)
+			}
+		} else if item.OwnerAddress != info.Address {
+			if item.OwnerAddress != "" {
+				pd.Database.DeleteMrc721OwnerItem(item.OwnerAddress, item.CollectionName, item.ItemPinId)
+			}
+			pd.Database.PutMrc721OwnerItem(info.Address, item.CollectionName, item.ItemPinId)
+			item.OwnerAddress = info.Address
+			item.OwnerMetaId = common.GetMetaIdByAddress(info.Address)
+		}
+		if !info.IsMeltdown {
+			item.Output = info.Output
+			item.OutputValue = info.OutputValue
+		}
+		item.TransferCount++
+		if err := pd.Database.SaveMrc721Item(item); err != nil {
+			log.Printf("[MRC721] save item %s on transfer: %v", pinId, err)
+			continue
+		}
+		if err := pd.Database.SaveMrc721ItemTransfer(&pebblestore.Mrc721ItemTransfer{
+			ItemPinId:   pinId,
+			FromAddress: info.FromAddress,
+			ToAddress:   info.Address,
+			ChainName:   chainName,
+			Height:      height,
+			TxId:        info.Location,
+			Time:        transferTime,
+		}); err != nil {
+			log.Printf("[MRC721] save item transfer %s: %v", pinId, err)
+		}
+	}
+}
+
 // ---------- pending 回放 ----------
 
 // mrc721DrainPending 专辑注册后回放全部暂存:mint 先入账,desc 后回填。

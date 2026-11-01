@@ -60,6 +60,7 @@ type Mrc721Item struct {
 	OwnerAddress     string `json:"ownerAddress"`
 	OwnerMetaId      string `json:"ownerMetaId"`
 	CreatorMinted    bool   `json:"creatorMinted"`
+	Burned           bool   `json:"burned"` // 熔化(meltdown)标记,持有人视图排除
 	ContentType      string `json:"contentType"`
 	ContentSummary   string `json:"contentSummary"`
 	GenesisChainName string `json:"genesisChainName"`
@@ -273,6 +274,18 @@ func (db *Database) IterateMrc721OwnerItems(ownerAddress, collectionName string,
 
 func (db *Database) SaveMrc721ItemTransfer(tr *Mrc721ItemTransfer) error {
 	return mrc721PutJSON(db.Mrc721Db, mrc721ItemTransferKey(tr.ItemPinId, tr.Height, tr.TxId), tr)
+}
+
+// IterateMrc721ItemTransfers 按高度正序遍历某条目的转移历史。
+func (db *Database) IterateMrc721ItemTransfers(itemPinId string, fn func(tr *Mrc721ItemTransfer) bool) error {
+	prefix := mrc721ItemTransferPrefix + itemPinId + "&"
+	return mrc721IteratePrefix(db.Mrc721Db, prefix, func(_ string, value []byte) bool {
+		var tr Mrc721ItemTransfer
+		if err := sonic.Unmarshal(value, &tr); err == nil {
+			return fn(&tr)
+		}
+		return true
+	})
 }
 
 // ---------- pending(乱序自愈) ----------

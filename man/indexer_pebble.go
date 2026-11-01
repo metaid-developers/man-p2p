@@ -193,6 +193,14 @@ func (pd *PebbleData) handleTransfer(chainName string, outputList []string, bloc
 		pd.Database.UpdateTransferPin(transferMap)
 		var transferHistoryList []*pin.PinTransferHistory
 		transferTime := time.Now().Unix()
+		// MRC-721 转移联动:output → pinId 映射由待检 pin 记录构建
+		if Mrc721RuntimeEnabled() {
+			pinIdByOutput := make(map[string]string, len(transferCheck))
+			for _, t := range transferCheck {
+				pinIdByOutput[t.Output] = t.Id
+			}
+			pd.mrc721TransferHook(chainName, blockHeight, transferMap, pinIdByOutput, transferTime)
+		}
 		for pinid, info := range transferMap {
 			transferHistoryList = append(transferHistoryList, &pin.PinTransferHistory{
 				PinId:          strings.ReplaceAll(pinid, ":", "i"),

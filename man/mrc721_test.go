@@ -268,3 +268,105 @@ func TestMrc721InvalidIgnored(t *testing.T) {
 		}
 	}
 }
+
+// ---------- P1 转移钩子 ----------
+
+func mrc721Transfer(itemPinId, to, from, output string, value int64, meltdown bool) (map[string]*pin.PinTransferInfo, map[string]string) {
+	transferMap := map[string]*pin.PinTransferInfo{
+		itemPinId + ":0": {
+			Address:     to,
+			FromAddress: from,
+			Output:      output,
+			OutputValue: value,
+			Location:    "spendtx-" + itemPinId,
+			IsMeltdown:  meltdown,
+		},
+	}
+	pinIdByOutput := map[string]string{itemPinId + ":0": itemPinId}
+	return transferMap, pinIdByOutput
+}
+
+func TestMrc721TransferUpdatesOwner(t *testing.T) {
+	mrc721TestSetup(t)
+
+	mrc721Run(t,
+		mrc721TestPin("c1", "/nft/mrc721/TrAlbum/collection_desc", "create", []byte(`{"name":"T"}`), mrc721Creator),
+		mrc721TestPin("n1", "/nft/mrc721/TrAlbum/a", "create", []byte(`"nft"`), mrc721Other),
+	)
+
+	transferMap, pinIdByOutput := mrc721Transfer("n1", mrc721Creator, mrc721Other, "spendtx-n1:1", 546, false)
+	PebbleStore.mrc721TransferHook("mvc", 200, transferMap, pinIdByOutput, 1700000100)
+
+	item, _ := PebbleStore.Database.GetMrc721Item("n1")
+	if item == nil || item.OwnerAddress != mrc721Creator || item.TransferCount != 1 {
+		t.Fatalf("owner not updated: %+v", item)
+	}
+	if item.OwnerMetaId == "" {
+		t.Fatalf("owner metaid missing")
+	}
+	if item.Output != "spendtx-n1:1" || item.OutputValue != 546 {
+		t.Fatalf("current outpoint not updated: %s %d", item.Output, item.OutputValue)
+	}
+	// 持有人索引换 key
+	newCount, oldCount := 0, 0
+	PebbleStore.Database.IterateMrc721OwnerItems(mrc721Creator, "TrAlbum", func(cn, ip string) bool { newCount++; return true })
+	PebbleStore.Database.IterateMrc721OwnerItems(mrc721Other, "TrAlbum", func(cn, ip string) bool { oldCount++; return true })
+	if newCount != 1 || oldCount != 0 {
+		t.Fatalf("owner index not swapped: new=%d old=%d", newCount, oldCount)
+	}
+	// 转移历史
+	histories := 0
+	var first *pebblestore.Mrc721ItemTransfer
+	err := PebbleStore.Database.IterateMrc721ItemTransfers("n1", func(tr *pebblestore.Mrc721ItemTransfer) bool {
+		histories++
+		if first == nil {
+			first = tr
+		}
+		return true
+	})
+	if err != nil || histories != 1 {
+		t.Fatalf("transfer history not recorded: %v %d", err, histories)
+	}
+	if first.FromAddress != mrc721Other || first.ToAddress != mrc721Creator || first.Height != 200 {
+		t.Fatalf("transfer history fields wrong: %+v", first)
+	}
+}
+
+func TestMrc721MeltdownBurns(t *testing.T) {
+	mrc721TestSetup(t)
+
+	mrc721Run(t,
+		mrc721TestPin("c1", "/nft/mrc721/BurnAlbum/collection_desc", "create", []byte(`{"name":"B"}`), mrc721Creator),
+		mrc721TestPin("n1", "/nft/mrc721/BurnAlbum/a", "create", []byte(`"nft"`), mrc721Creator),
+	)
+
+	transferMap, pinIdByOutput := mrc721Transfer("n1", mrc721Creator, mrc721Creator, "melttx:0", 546, true)
+	PebbleStore.mrc721TransferHook("mvc", 201, transferMap, pinIdByOutput, 1700000200)
+
+	item, _ := PebbleStore.Database.GetMrc721Item("n1")
+	if item == nil || !item.Burned {
+		t.Fatalf("meltdown should mark burned: %+v", item)
+	}
+	// 持有人视图移除
+	ownerCount := 0
+	PebbleStore.Database.IterateMrc721OwnerItems(mrc721Creator, "BurnAlbum", func(cn, ip string) bool { ownerCount++; return true })
+	if ownerCount != 0 {
+		t.Fatalf("burned item should leave owner view: %d", ownerCount)
+	}
+	// genesis outpoint 保持不变(熔化不改写 Output)
+	if item.Output != "n1:0" {
+		t.Fatalf("burned item output should stay genesis: %s", item.Output)
+	}
+}
+
+func TestMrc721TransferNonItemNoop(t *testing.T) {
+	mrc721TestSetup(t)
+
+	// 非 MRC-721 pin 的转移:钩子应无副作用
+	transferMap, pinIdByOutput := mrc721Transfer("plain-pin", mrc721Creator, mrc721Other, "x:1", 1000, false)
+	PebbleStore.mrc721TransferHook("mvc", 202, transferMap, pinIdByOutput, 1700000300)
+
+	if item, _ := PebbleStore.Database.GetMrc721Item("plain-pin"); item != nil {
+		t.Fatalf("non-item pin should not be indexed")
+	}
+}
