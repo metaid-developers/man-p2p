@@ -12,7 +12,7 @@
 2. **铸造**:向自己的专辑 mint NFT 条目(支持设置名称/描述/封面/metadata)。
 3. **转移**:把自己的 NFT 转给其他 MetaID 地址。
 4. **交易**:通过 PSBT 构建的部分签名交易完成 NFT 买卖。
-5. **浏览/查验**:专辑列表、我的 NFT、NFT 详情——**当前归属、转移路径、发行者、真伪**——全部来自本地 man-p2p 节点(local-first)。
+5. **浏览/查验**:专辑列表、我的 NFT、NFT 详情——**当前归属、转移路径、发行者、真伪**——统一经索引器读取(现有 `fetchFromLocalOrFallback` 路径:本地缓存 → 自建 override → manapi.metaid.io,详见 §2/§4)。
 
 链范围:BTC 与 MVC(同一套协议语义,man-p2p 以 `-chain btc,mvc` 同索引;应用层按 pin 的 chainName 展示来源)。
 
@@ -29,7 +29,9 @@
 | 转移路径 | `GET /api/mrc721/item/transfers?pinId=` | 溯源时间线 |
 | 真伪查验 | `GET /api/mrc721/item/verify?pinId=` | 详情页"已收录/官方铸造"标识 |
 
-约定:`address` 返回字段同时携带链地址与 `globalMetaId`;列表响应不含 ContentBody;确认轮询以 `item/info` / `collection/info` 命中为准(本地索引延迟 = pin 确认延迟)。
+约定:`address` 返回字段同时携带链地址与 `globalMetaId`;列表响应不含 ContentBody;确认轮询以 `item/info` / `collection/info` 命中为准(索引延迟 = pin 确认延迟)。
+
+读取路径(IDBots 现状,已移除内嵌索引器):`fetchFromLocalOrFallback` 模式——本地 sqlite 缓存(`metaid_pins` 表)→ 自建索引器 override(环境变量 `IDBOTS_MAN_P2P_LOCAL_BASE`,可选)→ `https://manapi.metaid.io` 兜底。`/api/mrc721/*` 部署至 manapi.metaid.io 后端后,以上端点沿同一模式自动可用,工具层无需区分本地/远程。
 
 ## 3. 功能需求
 
@@ -65,19 +67,47 @@
 
 ### R5 浏览与查验
 
-- 广场页:专辑分页列表(名称/封面/totalnum/royaltyRate/发行者)。
-- 我的页:我发行的专辑(`address/collection`)、我持有的 NFT(`address/item`)。
+- 广场页:专辑分页列表(名称/封面/totalnum/royaltyRate/发行者)→ `GET /api/mrc721/collection/pageList`。
+- **钱包资产页(用户钱包里持有的专辑与 NFT)**——持有人视图是索引器派生数据,链上 UTXO 查询无法提供专辑聚合,必须读索引接口:
+  - 持有的专辑列表 → `GET /api/mrc721/address/collection?address=`(索引层按该地址持有的条目去重专辑返回);
+  - 某专辑下持有的条目(或全部持有)→ `GET /api/mrc721/address/item?address=&pinId=`。
 - 详情页:NFT 当前归属、发行者、genesis(链/高度/tx)、转移时间线(`item/transfers`)、真伪事实(`item/verify`:已收录 + creatorMinted + collectionid)。
 - 身份展示:优先展示 MetaID(globalMetaId),链地址为辅。
 
-## 4. IDBots 侧技术落点(现状核查 2026-11-01)
+### R6 MetaBot 内置工具(IDBots 开发范围核心)
 
-- 已具备:
-  - man-p2p 二进制嵌入与本地 HTTP 调用(`npm run sync:man-p2p`);BTC PSBT 签名 RPC(`/api/idbots/wallet/btc/sign-psbt`);MRC20 订单/支付/观察者会话等交易基建(orderPayment、buyerOrderObserverSession、metabotTokenTransferService)。
+MetaBot 通过以下内置工具(agent tools)操作 MRC-721,注册模式沿用 `walletAgentTools.ts` 既有约定(名称 + 描述 + zod 参数 + 文本结果;批量 `metabot_ids` 单次调用;会话内写操作只动会话 bot 自己的钱包,私钥不出 host)。**命名采用 `mrc721_` 前缀,与既有 `wallet_nft_*`(合约系 NFT,genesis/codehash/tokenIndex 语义)严格区分**。
+
+| 工具 | 类型 | 功能 | 依赖 |
+|---|---|---|---|
+| `mrc721_collection_create` | 写 | 发行专辑:collectionName 预检(`collection/info`)→ 构造 collection_desc pin → 广播 → 轮询确认 | 钱包 pin 构造器 + manapi |
+| `mrc721_mint` | 写 | 铸造条目;可选 name/desc/cover/metadata(随发 item_desc) | 同上 |
+| `mrc721_transfer` | 写 | 转移:`item/info` 取当前 output → 强制 outpoint 花费构建转移交易 → 广播 → 轮询 `item/transfers` | raw-tx `include_outpoints`(§4) |
+| `mrc721_balance` | 读 | 我的持仓:`address/item`(可按专辑过滤) | manapi |
+| `mrc721_collections` | 读 | 我的专辑 + 广场:`address/collection`、`collection/pageList` | manapi |
+| `mrc721_item_info` | 读 | 详情 + 真伪 + 溯源:`item/info`、`item/verify`、`item/transfers` | manapi |
+| `mrc721_collection_info` | 读 | 专辑详情与条目分页 | manapi |
+| `mrc721_sell` / `mrc721_buy` / `mrc721_sell_orders` | 写/读 | V1.1 模型 A 订单托管式交易(挂单/购买/查单) | 订单基建 + `mrc721_transfer` |
+
+## 4. IDBots 侧技术落点(现状核查 2026-11-01 修订)
+
+- **索引数据访问(重要修正)**:IDBots 已在 `refactor/remove-man-p2p`(80c8a718)移除内嵌 man-p2p 运行时与打包二进制,改为 **remote-first 读取**:`fetchFromLocalOrFallback` = 本地 sqlite 缓存(`metaid_pins` 表)→ 自建索引器 override(`IDBOTS_MAN_P2P_LOCAL_BASE`)→ `https://manapi.metaid.io` 兜底。本文档所有索引读取均指该路径,无本地内嵌依赖。
+- 已具备(钱包/交易侧):
+  - BTC PSBT 签名 RPC(`/api/idbots/wallet/btc/sign-psbt`);MRC20 订单/支付/观察者会话等交易基建(orderPayment、buyerOrderObserverSession、metabotTokenTransferService)。
   - MVC 转账执行与 raw-tx 构建链:`executeTransfer`、`BUILD_MVC_TRANSFER_RAW_TX`、`BUILD_MVC_FT_TRANSFER_RAW_TX`、`BUILD_MVC_RAW_TX_BUNDLE`(walletRawTxService + workers)。
-  - MVC **合约系 NFT 全栈**(`mvcNftService` + `buildMvcNft*Worker`,meta-contract `NftManager`):余额、转移、挂卖/购买/撤单(两段式交易)。注意其对象是**合约系 NFT**(genesis/codehash/tokenIndex,sensibleId,metalet.space 数据源),与 MRC-721(pin 系)是**并存的两套协议**,不通用。
+  - agent tools 注册基建(walletAgentTools.ts:wallet_balance/wallet_transfer/wallet_nft_*/wallet_token_* 等既有工具)。
+  - MVC **合约系 NFT 全栈**(`mvcNftService` + meta-contract `NftManager`)——**本期不动**,与 MRC-721 并存两套协议(§5.2)。
+- **生产接口可用性(2026-11-01)**:
+
+  | 接口 | 状态 |
+  |---|---|
+  | `/pin/:id`、余额/UTXO、BTC sign-psbt、MVC 转账/raw-tx 构建 | 已上线,可用 |
+  | `/api/mrc721/*`(§2 全部 8 端点) | **未上线**——依赖 man-p2p P2 实现并部署至 manapi.metaid.io 后端节点;旧 MetaSo 服务器虽有同形接口但不在 IDBots 读取路径上,不作为依赖 |
+
+- **开发时序结论**:IDBots **可以立即开工**——工具层(R6)、钱包侧(R1–R3)、UI 按 §2 API 契约开发,mock 数据先行;联调与生产验收依赖 man-p2p **P1(转移钩子)+ P2(JSON API)** 合入并部署 manapi.metaid.io。man-p2p 侧 P0(索引与聚合)已完成。
+
 - 需新增(IDBots 侧):
-  1. MRC-721 pin 构造器(collection_desc / item mint / item_desc)。
+  1. MRC-721 pin 构造器(collection_desc / item mint / item_desc)+ R6 工具集。
   2. **raw-tx 构建器的"强制花费指定 outpoint"能力**:现有构建器只支持 `exclude_outpoints`,无法指定输入;MRC-721 转移 = 花费 NFT pin 所在 output,必须支持 `include_outpoints`(或专用 `buildMvc721TransferRawTx`)。这是转移(R3)与交易(R4)共同的前置。
   3. 挂单/成交流程与 NFT UI(广场/详情/我的)。
 
@@ -95,7 +125,7 @@
 ## 6. 验收标准(V1)
 
 1. MetaBot 内完成:发行专辑 → mint ≥2 个 NFT(其一后补 item_desc)→ 转移给另一地址,全程 MVC;BTC 侧以回填数据做只读验收。
-2. 全程无需外部服务:所有查询命中本地 man-p2p(peerless 亦可用)。
+2. 联调:以 `IDBOTS_MAN_P2P_LOCAL_BASE` 指向测试 man-p2p 节点,或按 §2 契约 mock;生产验收以 manapi.metaid.io 上线 `/api/mrc721/*` 后为准。
 3. 详情页正确展示:当前归属、完整转移路径、发行者、真伪标识(含一个第三方铸造样例展示"第三方铸造"标识)。
 4. 交易(若 V1.1 同期,模型 A):挂单 → 付款 → 卖家转移 NFT → `item/transfers` 确认交割,流程闭环。
 
