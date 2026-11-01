@@ -208,6 +208,30 @@ func (db *Database) GetMrc721CollectionByPinId(collectionDescPinId string) (*Mrc
 	return db.GetMrc721CollectionByName(string(nameBytes))
 }
 
+// ListMrc721Collections 全量遍历专辑(offset 分页;当前量级可行,排序索引见设计文档 §8.4)。
+func (db *Database) ListMrc721Collections(offset, limit int64) ([]*Mrc721Collection, int64, error) {
+	var all []*Mrc721Collection
+	err := mrc721IteratePrefix(db.Mrc721Db, mrc721CollectionKeyPrefix, func(_ string, value []byte) bool {
+		var col Mrc721Collection
+		if err := sonic.Unmarshal(value, &col); err == nil {
+			all = append(all, &col)
+		}
+		return true
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	total := int64(len(all))
+	if offset >= total {
+		return []*Mrc721Collection{}, total, nil
+	}
+	end := offset + limit
+	if end > total || end <= 0 {
+		end = total
+	}
+	return all[offset:end], total, nil
+}
+
 // ---------- item ----------
 
 func (db *Database) SaveMrc721Item(item *Mrc721Item) error {

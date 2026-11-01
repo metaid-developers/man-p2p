@@ -351,6 +351,7 @@ func registerRuntimeFeatureRoutesForMode(r *gin.Engine, chainSourceEnabled bool)
 	if common.ModuleExist("mrc721") {
 		r.GET("/mrc721/:page", mrc721List)
 		r.GET("/mrc721/item/list/:name/:page", mrc721ItemList)
+		mrc721JsonApi(r)
 	}
 }
 
