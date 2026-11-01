@@ -153,6 +153,10 @@ func TestMrc721CollectionPageList(t *testing.T) {
 	if item["collectionname"] != "SeedAlbum" || item["pinid"] != "seed-coll-pin" || item["totalnum"] != float64(2) {
 		t.Fatalf("collection fields wrong: %v", item)
 	}
+	// camelCase 别名(IDBots 契约)
+	if item["collectionName"] != "SeedAlbum" || item["totalSupply"] != float64(10) || item["royaltyRate"] != float64(5) || item["createAddress"] != "addr-creator" || item["createTime"] != float64(1700000000) || item["genesisChainName"] != "mvc" {
+		t.Fatalf("collection camelCase aliases wrong: %v", item)
+	}
 }
 
 func TestMrc721CollectionInfoByNameAndPinId(t *testing.T) {
@@ -229,6 +233,10 @@ func TestMrc721ItemInfoAndTransfersAndVerify(t *testing.T) {
 	if data == nil || data["collectionPinId"] != "seed-coll-pin" || data["txOutput"] != "seed-item-2:0" {
 		t.Fatalf("item info wrong: %v", body)
 	}
+	// camelCase 别名(IDBots 契约)
+	if data["ownerAddress"] != "addr-holder" || data["ownerMetaId"] != "meta-holder" || data["output"] != "seed-item-2:0" || data["outputValue"] != float64(546) || data["number"] != float64(2) || data["genesisChainName"] != "mvc" {
+		t.Fatalf("item camelCase aliases wrong: %v", data)
+	}
 
 	// item/transfers
 	body = mrc721GetJSON(t, r, "/api/mrc721/item/transfers?pinId=seed-item-2&cousor=0&size=10")
@@ -243,6 +251,10 @@ func TestMrc721ItemInfoAndTransfersAndVerify(t *testing.T) {
 	data, _ = body["data"].(map[string]interface{})
 	if data == nil || data["indexed"] != true || data["creatorMinted"] != true {
 		t.Fatalf("verify wrong: %v", body)
+	}
+	// IDBots 契约别名
+	if data["collected"] != true || data["collectionid"] != "seed-coll-pin" || data["itemPinId"] != "seed-item-1" || data["genesisChainName"] != "mvc" {
+		t.Fatalf("verify aliases wrong: %v", data)
 	}
 	if data["collectionGenesis"] == nil || data["itemGenesis"] == nil {
 		t.Fatalf("verify genesis facts missing: %v", data)

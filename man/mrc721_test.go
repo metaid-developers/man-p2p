@@ -3,6 +3,7 @@ package man
 import (
 	"testing"
 
+	"man-p2p/common"
 	"man-p2p/pebblestore"
 	"man-p2p/pin"
 )
@@ -370,5 +371,84 @@ func TestMrc721TransferNonItemNoop(t *testing.T) {
 
 	if item, _ := PebbleStore.Database.GetMrc721Item("plain-pin"); item != nil {
 		t.Fatalf("non-item pin should not be indexed")
+	}
+}
+
+// ---------- 幂等:同一 pin/转移事件经链上与 P2P 双路径到达、或回填重跑 ----------
+
+func TestMrc721DoubleMintIdempotent(t *testing.T) {
+	mrc721TestSetup(t)
+
+	pin1 := mrc721TestPin("c1", "/nft/mrc721/IdemAlbum/collection_desc", "create", []byte(`{"name":"I"}`), mrc721Creator)
+	item1 := mrc721TestPin("i1", "/nft/mrc721/IdemAlbum/a", "create", []byte(`"x"`), mrc721Creator)
+	// 同一批次重复投递 + 跨批次重复投递
+	mrc721Run(t, pin1, item1, item1)
+	mrc721Run(t, item1)
+
+	col, _ := PebbleStore.Database.GetMrc721CollectionByName("IdemAlbum")
+	if col == nil || col.TotalNum != 1 {
+		t.Fatalf("double mint should not double count: %+v", col)
+	}
+	item, _ := PebbleStore.Database.GetMrc721Item("i1")
+	if item == nil || item.Number != 1 {
+		t.Fatalf("item number should stay 1: %+v", item)
+	}
+	listed := 0
+	PebbleStore.Database.IterateMrc721CollectionItems("IdemAlbum", func(seq int64, id string) bool { listed++; return true })
+	if listed != 1 {
+		t.Fatalf("coll item list should have 1 entry: %d", listed)
+	}
+}
+
+func TestMrc721DoubleTransferIdempotent(t *testing.T) {
+	mrc721TestSetup(t)
+
+	mrc721Run(t,
+		mrc721TestPin("c1", "/nft/mrc721/IdemTrAlbum/collection_desc", "create", []byte(`{"name":"IT"}`), mrc721Creator),
+		mrc721TestPin("i1", "/nft/mrc721/IdemTrAlbum/a", "create", []byte(`"x"`), mrc721Creator),
+	)
+	transferMap, pinIdByOutput := mrc721Transfer("i1", mrc721Other, mrc721Creator, "spend:1", 546, false)
+	PebbleStore.mrc721TransferHook("mvc", 210, transferMap, pinIdByOutput, 1700000400)
+	PebbleStore.mrc721TransferHook("mvc", 210, transferMap, pinIdByOutput, 1700000400)
+
+	item, _ := PebbleStore.Database.GetMrc721Item("i1")
+	if item == nil || item.TransferCount != 1 || item.OwnerAddress != mrc721Other {
+		t.Fatalf("double transfer should be idempotent: %+v", item)
+	}
+	historyCount := 0
+	PebbleStore.Database.IterateMrc721ItemTransfers("i1", func(tr *pebblestore.Mrc721ItemTransfer) bool { historyCount++; return true })
+	if historyCount != 1 {
+		t.Fatalf("transfer history should have 1 entry: %d", historyCount)
+	}
+}
+
+func TestMrc721P2PIngestHook(t *testing.T) {
+	mrc721TestSetup(t)
+
+	origConfig := common.Config
+	defer func() { common.Config = origConfig }()
+	common.Config = &common.AllConfig{}
+	common.Config.Module = []string{"mrc721"}
+
+	// 确认 pin(GenesisHeight>0)经 P2P ingest 应聚合
+	confirmed := mrc721TestPin("p2p-i1", "/nft/mrc721/P2PAlbum/a", "create", []byte(`"x"`), mrc721Creator)
+	if err := IngestP2PPin(confirmed); err != nil {
+		t.Fatalf("ingest confirmed: %v", err)
+	}
+	// 专辑未注册 → 暂存 pending(不是丢失)
+	pending, _ := PebbleStore.Database.PopMrc721Pending("P2PAlbum")
+	if len(pending) != 1 {
+		t.Fatalf("confirmed p2p pin should be aggregated (pending), got %d", len(pending))
+	}
+
+	// mempool pin(GenesisHeight<0)不聚合
+	mempoolPin := mrc721TestPin("p2p-i2", "/nft/mrc721/P2PAlbum/b", "create", []byte(`"y"`), mrc721Creator)
+	mempoolPin.GenesisHeight = -1
+	if err := IngestP2PPin(mempoolPin); err != nil {
+		t.Fatalf("ingest mempool: %v", err)
+	}
+	pending2, _ := PebbleStore.Database.PopMrc721Pending("P2PAlbum")
+	if len(pending2) != 0 {
+		t.Fatalf("mempool p2p pin should not be aggregated, got %d", len(pending2))
 	}
 }

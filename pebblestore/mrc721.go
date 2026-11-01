@@ -300,6 +300,16 @@ func (db *Database) SaveMrc721ItemTransfer(tr *Mrc721ItemTransfer) error {
 	return mrc721PutJSON(db.Mrc721Db, mrc721ItemTransferKey(tr.ItemPinId, tr.Height, tr.TxId), tr)
 }
 
+// GetMrc721ItemTransfer 按 (itemPinId, height, txId) 精确取转移记录(幂等判断用)。
+func (db *Database) GetMrc721ItemTransfer(itemPinId string, height int64, txId string) (*Mrc721ItemTransfer, error) {
+	var tr Mrc721ItemTransfer
+	found, err := mrc721GetJSON(db.Mrc721Db, mrc721ItemTransferKey(itemPinId, height, txId), &tr)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &tr, nil
+}
+
 // IterateMrc721ItemTransfers 按高度正序遍历某条目的转移历史。
 func (db *Database) IterateMrc721ItemTransfers(itemPinId string, fn func(tr *Mrc721ItemTransfer) bool) error {
 	prefix := mrc721ItemTransferPrefix + itemPinId + "&"

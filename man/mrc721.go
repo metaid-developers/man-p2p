@@ -240,7 +240,11 @@ func (pd *PebbleData) mrc721MintHandle(collectionName string, pinNode *pin.PinIn
 }
 
 // mrc721MintCommit 收录条目:supply 校验、序号分配、主表/列表/持有人索引。
+// 按 itemPinId 幂等:同一 pin 经链上与 P2P 双路径到达、或回填重跑时不重复计数。
 func (pd *PebbleData) mrc721MintCommit(collectionName string, col *pebblestore.Mrc721Collection, mint *pebblestore.Mrc721PendingMint) bool {
+	if existing, _ := pd.Database.GetMrc721Item(mint.ItemPinId); existing != nil {
+		return true
+	}
 	if col.TotalSupply != -1 && col.TotalNum >= col.TotalSupply {
 		log.Printf("[MRC721] mint %s rejected: exceeds totalSupply %d", collectionName, col.TotalSupply)
 		return false
@@ -292,6 +296,10 @@ func (pd *PebbleData) mrc721TransferHook(chainName string, height int64, transfe
 	for output, info := range transferMap {
 		pinId := pinIdByOutput[output]
 		if pinId == "" {
+			continue
+		}
+		// 按 (itemPinId, height, txid) 幂等:同一转移事件重放(链上 re-index/P2P 重投递/回填重跑)不重复计数
+		if existing, _ := pd.Database.GetMrc721ItemTransfer(pinId, height, info.Location); existing != nil {
 			continue
 		}
 		item, err := pd.Database.GetMrc721Item(pinId)

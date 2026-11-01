@@ -59,25 +59,32 @@ func mrc721QuerySize(ctx *gin.Context) int64 {
 }
 
 // mrc721CollectionDTO 字段名兼容旧 MetaSo(collectionname/pinid/createtime/totalnum 等),
-// 并扩展链来源字段。
+// 并同时提供 camelCase 别名(IDBots 契约)与链来源字段。
 func mrc721CollectionDTO(col *pebblestore.Mrc721Collection) gin.H {
 	return gin.H{
-		"collectionname": col.CollectionName,
-		"name":           col.Name,
-		"totalsupply":    col.TotalSupply,
-		"royaltyrate":    col.RoyaltyRate,
-		"desc":           col.Desc,
-		"website":        col.Website,
-		"cover":          col.Cover,
-		"metadata":       col.Metadata,
-		"pinid":          col.PinId,
-		"address":        col.CreateAddress,
-		"metaid":         col.CreateMetaId,
-		"createtime":     col.CreateTime,
-		"totalnum":       col.TotalNum,
-		"chainName":      col.GenesisChainName,
-		"genesisHeight":  col.GenesisHeight,
-		"genesisTx":      col.GenesisTx,
+		"collectionname":   col.CollectionName,
+		"collectionName":   col.CollectionName,
+		"name":             col.Name,
+		"totalsupply":      col.TotalSupply,
+		"totalSupply":      col.TotalSupply,
+		"royaltyrate":      col.RoyaltyRate,
+		"royaltyRate":      col.RoyaltyRate,
+		"desc":             col.Desc,
+		"website":          col.Website,
+		"cover":            col.Cover,
+		"metadata":         col.Metadata,
+		"pinid":            col.PinId,
+		"address":          col.CreateAddress,
+		"metaid":           col.CreateMetaId,
+		"createAddress":    col.CreateAddress,
+		"createMetaId":     col.CreateMetaId,
+		"createtime":       col.CreateTime,
+		"createTime":       col.CreateTime,
+		"totalnum":         col.TotalNum,
+		"chainName":        col.GenesisChainName,
+		"genesisChainName": col.GenesisChainName,
+		"genesisHeight":    col.GenesisHeight,
+		"genesisTx":        col.GenesisTx,
 	}
 }
 
@@ -85,27 +92,35 @@ func mrc721CollectionDTO(col *pebblestore.Mrc721Collection) gin.H {
 // 归属字段 address/metaId 为当前持有人;扩展 burned/transferCount/链来源。
 func mrc721ItemDTO(item *pebblestore.Mrc721Item) gin.H {
 	return gin.H{
-		"collectionPinId": item.CollectionPinId,
-		"collectionName":  item.CollectionName,
-		"itemPinId":       item.ItemPinId,
-		"itemPinNumber":   item.Number,
-		"name":            item.Name,
-		"desc":            item.Desc,
-		"cover":           item.Cover,
-		"metaData":        item.Metadata,
-		"createTime":      item.CreateTime,
-		"address":         item.OwnerAddress,
-		"metaId":          item.OwnerMetaId,
-		"creatorMinted":   item.CreatorMinted,
-		"contentType":     item.ContentType,
-		"contentString":   item.ContentSummary,
-		"txOutput":        item.Output,
-		"txValue":         item.OutputValue,
-		"burned":          item.Burned,
-		"transferCount":   item.TransferCount,
-		"chainName":       item.GenesisChainName,
-		"genesisHeight":   item.GenesisHeight,
-		"genesisTx":       item.GenesisTx,
+		"collectionPinId":  item.CollectionPinId,
+		"collectionName":   item.CollectionName,
+		"itemPinId":        item.ItemPinId,
+		"itemPinNumber":    item.Number,
+		"number":           item.Number,
+		"name":             item.Name,
+		"desc":             item.Desc,
+		"cover":            item.Cover,
+		"metaData":         item.Metadata,
+		"metadata":         item.Metadata,
+		"createTime":       item.CreateTime,
+		"address":          item.OwnerAddress,
+		"metaId":           item.OwnerMetaId,
+		"ownerAddress":     item.OwnerAddress,
+		"ownerMetaId":      item.OwnerMetaId,
+		"creatorMinted":    item.CreatorMinted,
+		"contentType":      item.ContentType,
+		"contentString":    item.ContentSummary,
+		"contentSummary":   item.ContentSummary,
+		"txOutput":         item.Output,
+		"txValue":          item.OutputValue,
+		"output":           item.Output,
+		"outputValue":      item.OutputValue,
+		"burned":           item.Burned,
+		"transferCount":    item.TransferCount,
+		"chainName":        item.GenesisChainName,
+		"genesisChainName": item.GenesisChainName,
+		"genesisHeight":    item.GenesisHeight,
+		"genesisTx":        item.GenesisTx,
 	}
 }
 
@@ -388,8 +403,8 @@ func mrc721ItemVerify(ctx *gin.Context) {
 		return
 	}
 	if item == nil {
-		// 未收录:返回事实集,由展示层判定
-		ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"indexed": false, "pinId": pinId}))
+		// 未收录:返回事实集,由展示层判定(collected 为 IDBots 契约别名)
+		ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"indexed": false, "collected": false, "pinId": pinId, "itemPinId": pinId}))
 		return
 	}
 	genesisChainName, genesisHeight, genesisTx := "", int64(0), ""
@@ -397,15 +412,21 @@ func mrc721ItemVerify(ctx *gin.Context) {
 		genesisChainName, genesisHeight, genesisTx = col.GenesisChainName, col.GenesisHeight, col.GenesisTx
 	}
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{
-		"indexed":         true,
-		"pinId":           pinId,
-		"collectionName":  item.CollectionName,
-		"collectionPinId": item.CollectionPinId,
-		"creatorMinted":   item.CreatorMinted,
-		"burned":          item.Burned,
-		"transferCount":   item.TransferCount,
-		"ownerAddress":    item.OwnerAddress,
-		"ownerMetaId":     item.OwnerMetaId,
+		"indexed":          true,
+		"collected":        true,
+		"pinId":            pinId,
+		"itemPinId":        pinId,
+		"collectionName":   item.CollectionName,
+		"collectionid":     item.CollectionPinId,
+		"collectionPinId":  item.CollectionPinId,
+		"creatorMinted":    item.CreatorMinted,
+		"burned":           item.Burned,
+		"transferCount":    item.TransferCount,
+		"ownerAddress":     item.OwnerAddress,
+		"ownerMetaId":      item.OwnerMetaId,
+		"genesisChainName": item.GenesisChainName,
+		"genesisHeight":    item.GenesisHeight,
+		"genesisTx":        item.GenesisTx,
 		"itemGenesis": gin.H{
 			"chainName": item.GenesisChainName,
 			"height":    item.GenesisHeight,
