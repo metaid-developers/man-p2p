@@ -131,14 +131,22 @@
 
 响应统一沿用 `api/respond` 现有 `ApiSuccess/Err*` 封装;列表项**裁剪 ContentBody**(遵循现有列表裁剪惯例);地址字段同时返回 `address` 与 `globalMetaId`(跨链统一身份)。
 
-## 6. 数据回填(BTC 存量)
+## 6. 数据回填(BTC 存量,方案 A:离线快照重放,2026-11-01 定稿)
 
-- 事实澄清:metaso 的聚合结果在 **MongoDB**(`mrc721collection`/`mrc721item`),v1 MAN 的 pins 视图同样是 Mongo——并非 Pebble,无法直接搬库。
-- BTC 上 MRC-721 数据量很小,采用**重放回填**(单一事实源,规则统一,不搬二手聚合数据):
-  1. 一次性脚本从旧生产 Mongo `pins` 视图导出 `path ~ ^/nft/mrc721` 且 `operation=create` 的 pin(按 _id 序)+ `pin_transfer_history`;
-  2. 转成 `pin.PinInscription` JSON,走与实时 ingest **同一套** `Mrc721PinHook`/`Mrc721TransferHook` 重放;
-  3. 回填幂等(全表 upsert by pinId),可分批、可重跑。
-- 若无法访问旧 Mongo,备选:man-p2p 直接对 BTC 全量重扫该路径(PathPinDB 若有 BTC 存量则零成本;否则代价高,不推荐)。
+硬约束:**不得在生产节点上执行全量扫描类回填**——历史经验表明会拖垮或打挂线上索引服务。
+
+生产节点 1(chain-enabled btc,mvc)的 Pebble 已含全部历史 pin,回填只需重放其中少量 `/nft/mrc721` pin,因此采用**离线快照重放**:
+
+1. 按新节点 SOP 的种子复制方式取得数据目录快照(在线预复制 + 短停机 final delta,停机窗口秒级);
+2. 在离线机器上对快照执行 `tools/mrc721_backfill -data-dir <快照> [-chain btc] [-dry-run]`:
+   - 扫描全部 pins 分片(含 "rc721" 粗筛预过滤),收集 `create` 且路径前缀 `/nft/mrc721` 的 pin 主记录(即最新记录,含当前持有人);
+   - **铸造重放**:`(genesisHeight, txIndex, Id)` 升序、Address 取 `InitialOwner`(创世持有人语义),走与实时 ingest **同一套** `handleMrc721` 聚合;
+   - **转移时间线重放**:快照 `TransferDb`(PinId 与 itemPinId 同为 `txidiN` 格式)按高度升序经 `Mrc721BackfillRunTransfers` 重放;
+   - **归属/outpoint 校正**:`Mrc721BackfillReconcileOwner` 按 pin 主记录的当前 Address/Output 兜底 TransferDb 缺口;`Status==PinStatusMeltdown` 标记 burned;
+   - 全表 upsert by pinId,**幂等可重跑**(重跑计数不变)。
+3. 产物为快照内新增的 `mrc721/db`(体积极小),整目录拷回生产节点对应路径即可;或让该离线节点作为 p2p follower 直接对外服务。
+
+事实澄清(存档):metaso 的聚合结果在 MongoDB,无法直接搬库;若快照中缺 BTC 历史 pin(快照不含全量 BTC 史时),备选从旧生产 Mongo `pins` 视图导出后走同一套入口重放。
 
 ## 7. 分阶段实施
 

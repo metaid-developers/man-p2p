@@ -46,6 +46,8 @@ func mrc721Run(t *testing.T, pins ...*pin.PinInscription) {
 
 const mrc721Creator = "mvc1qcreator"
 const mrc721Other = "mvc1qother"
+const mrc721Holder = "mvc1qholder"
+const mrc721Buyer = "mvc1qbuyer"
 
 func TestMrc721CollectionRegisterFirstWins(t *testing.T) {
 	mrc721TestSetup(t)
