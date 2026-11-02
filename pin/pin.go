@@ -102,6 +102,9 @@ type PinTransferHistory struct {
 	ChainName      string `json:"chainName"`
 	FromAddress    string `json:"fromAddress"`
 	ToAddress      string `json:"toAddress"`
+	// OutputValue 转移 tx 落 pin 的输出 sat 值(回填记录可选字段,离线数据无法自链上推导,
+	// 由记录生成方按链上实值填写;缺失为 0,断言会拒绝值级为 0 的未熔化条目)。
+	OutputValue int64 `json:"outputValue,omitempty"`
 }
 type MempollChanMsg struct {
 	PinList []*PinInscription
