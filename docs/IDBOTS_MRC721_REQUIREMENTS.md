@@ -56,14 +56,15 @@
 - 行为:钱包按该 outpoint 构建转移交易并广播;完成后轮询 `item/info` 的 owner 变化 + `item/transfers` 新增记录。
 - 注意:同一 output 的找零/合并需避免把 NFT UTXO 当普通零钱花掉——钱包 UTXO 管理须将 NFT 所在 outpoint 标记为"资产 UTXO"(依赖 `item/info` 与 `address/item` 的持仓清单)。
 
-### R4 交易(模型见 §5.1,建议 V1.1 走 A、V2 升级 C)
+### R4 交易(V1.1 = 原子交换,PSBT 语义;详见 docs/IDBOTS_MRC721_V1_1_ATOMIC_SWAP_PLAN.md)
 
-- 模式(对齐现有 MRC20/服务订单基建的形态,由 IDBots 侧定稿):
-  1. 卖方挂单:指定 NFT(pinId)与要价;托管/撮合的订单态由 IDBots 侧存储(现有 sqliteStore/orderPayment 模式)。
-  2. 成交构建:卖方以 NFT 当前 outpoint 为输入构建交易,输出含买方得 NFT、卖方收款(含可选 royalty 输出,比例取 `collection/info.royaltyRate`)。模型 A 下为卖家单方签名转移;模型 C 下为部分签名交易(PSBT/TxComposer 装配),买卖双方各签后广播。
-  3. 签名流转:BTC 复用现有 `/api/idbots/wallet/btc/sign-psbt` RPC(`metaidRpcServer.ts` 已有,SIGN_PSBT 模式);MVC 侧模型 A 仅需普通转移(现有 `executeTransfer` + 强制 outpoint 参数),模型 C 需新增 TxComposer 部分签名端点(§5.1)。
-  4. 广播与确认:广播后以 `item/info` owner 变化 + `item/transfers` 为最终交割依据(索引即权威)。
-- man-p2p 在交易中的职责边界:**只读数据源**(outpoint、归属、历史、royaltyRate);订单、撮合、托管、纠纷不在索引层。
+- **一笔 MVC 交易完成买卖**,无订单托管、无链下信任链:
+  1. 卖方挂单(`mrc721_sell`):查索引器取 NFT 当前 outpoint → `TxComposer` 组装交易[输入0=NFT outpoint(**仅卖家签名**),输出0=NFT→买家地址,输出1=价格→卖家地址]→ 序列化为**挂单凭证(listing tuple)**,链下传递。
+  2. 买方购买(`mrc721_buy`):**买前硬校验**(卖家签名有效、NFT outpoint 与索引器归属/未花一致、价格输出确实付给卖家)→ 注入自己的付款输入 + 找零输出(买家承担手续费)→ 签全 → 广播 → 以 `item/transfers` 出现记录为交割依据。
+  3. 查单(`mrc721_sell_orders`):对给定 listing tuple 做全量复核(签名/归属/未花/价格),**不做链上订单索引**——挂单凭证链下传递,与合约系 TokenSell 的 `wallet_token_sell_orders` 验证模式同构。
+- **交易形状铁律延续**:NFT outpoint 必须输入 0、NFT 过户输出必须输出 0(索引器 `GetOWnerAddress` 按此解析归属)。
+- 边界语义:同一 NFT 多张挂单,先广播先成交、其余自然作废;挂单后 NFT 被转走 → 买前校验拦截;挂单过期仅链下约定(expiresAt),V1.1 不上链。
+- man-p2p 在交易中的职责边界:**只读数据源**(outpoint、归属、未花状态、历史、royaltyRate);撮合、托管、纠纷不在索引层。
 
 ### R5 浏览与查验
 
@@ -87,7 +88,7 @@ MetaBot 通过以下内置工具(agent tools)操作 MRC-721,注册模式沿用 `
 | `mrc721_collections` | 读 | 我的专辑 + 广场:`address/collection`、`collection/pageList` | manapi |
 | `mrc721_item_info` | 读 | 详情 + 真伪 + 溯源:`item/info`、`item/verify`、`item/transfers` | manapi |
 | `mrc721_collection_info` | 读 | 专辑详情与条目分页 | manapi |
-| `mrc721_sell` / `mrc721_buy` / `mrc721_sell_orders` | 写/读 | V1.1 模型 A 订单托管式交易(挂单/购买/查单) | 订单基建 + `mrc721_transfer` |
+| `mrc721_sell` / `mrc721_buy` / `mrc721_sell_orders` | 写/读 | V1.1 原子交换交易(挂单=部分签名凭证 / 购买=校验+签全+广播 / 查单=凭证复核) | TxComposer 部分签名 worker(新) |
 
 ## 4. IDBots 侧技术落点(现状核查 2026-11-01 修订)
 
@@ -113,13 +114,13 @@ MetaBot 通过以下内置工具(agent tools)操作 MRC-721,注册模式沿用 `
 
 ## 5. 待确认(IDBots 侧拍板项)
 
-1. **MRC-721 交易结算模型** —— **已定稿(2026-11-01):V1.1 采用 A 订单托管式**;C 原子交换式保留为 V2 升级候选;B 合约挂单式弃用:
-   - A. 订单托管式(已选定):买家付款 → 卖家转移 NFT(outpoint 强制花费);信任由订单/托管逻辑承担(复用现有 orderPayment 模式)。改动最小,纯钱包既有能力 + 第 2 项新参数。
-   - B. 合约挂单式(弃用):仿现有合约系 NFT 的 sell/buy,但需把 pin-NFT 适配进 NftManager 两段式合约流程,工作量大、收益不明显。
-   - C. 原子交换式(V2 候选,真 PSBT 语义):一笔交易同时含买家付款输入与卖家 NFT 输入,双方签名后广播。BTC 已有 sign-psbt 可做;MVC 的 meta-contract `TxComposer` 支持部分签名装配,但现有 RPC 未暴露——需新增"部分签名组装/外部签名回填"端点。MRC-721 转移是普通 UTXO 花费,单笔原子交换无需合约,技术上顺理成章。
+1. **MRC-721 交易结算模型** —— **已定稿并修订(2026-11-02):V1.1 采用 C 原子交换式(PSBT 语义)**;A 订单托管式降级为托管兜底备选(仅适用于"卖家离线代售/平台托管"类场景,本期不实现);B 合约挂单式弃用:
+   - C. 原子交换式(已选定,一步到位):**一笔 MVC 交易同时完成付款与 NFT 过户**——卖家以部分签名交易挂单(NFT 输入已签),买家校验后注入付款输入并签全广播;交易要么整笔上链(钱和 NFT 同时换手)要么整笔作废,无单方面得利的中间状态。技术要点:MRC-721 转移是普通 UTXO 花费,无需合约;MVC 侧经 meta-contract `TxComposer` 部分签名装配(需新增 worker,见 `docs/IDBOTS_MRC721_V1_1_ATOMIC_SWAP_PLAN.md`);BTC 侧已有真 PSBT RPC,后续可加。
+   - A. 订单托管式(降级备选):买家付款 → 卖家转移 NFT(outpoint 强制花费);信任由订单/托管逻辑承担。**非原子**(买家先付款存在对手方风险),这是降级原因;但其订单态基建对"代售/托管"场景仍有价值。
+   - B. 合约挂单式(弃用):仿现有合约系 NFT 的 sell/buy,需把 pin-NFT 适配进 NftManager 两段式合约流程,工作量大、收益不明显。
 2. **合约系 NFT 与 MRC-721 并存展示**(已明确 2026-11-01):本期专注 MRC-721,IDBots 已实现的 metacontract NFT 全栈(mvcNftService)**先不动**;钱包资产页并存展示方式由 UI 届时定。metacontract → MRC-721 格式转换列入后续规划(见 §7)。
-3. 挂单/订单存储与撮合:本地 sqlite 是否够用;跨设备发现是否需要云端目录(不进 man-p2p 索引层)。
-4. royalty 结算:V1 仅登记与展示 royaltyRate,分账输出是否进交易 PSBT/模板。
+3. 挂单凭证发现:V1.1 链下传递(本地 sqlite 存自己发出的挂单 + 点对点传递凭证);云端撮合目录为后续可选项(不进 man-p2p 索引层)。
+4. royalty 结算:V1.1 仅登记与展示 royaltyRate(原子交换交易不含分账输出,输出布局需保持铁律稳定);分账输出作为后续增强单独评估。
 5. 双链资产展示:BTC 与 MVC 的 NFT 同列表混排(按 genesisChainName 过滤)还是分页签,由 UI 定。
 
 ## 6. 验收标准(V1)
@@ -127,7 +128,7 @@ MetaBot 通过以下内置工具(agent tools)操作 MRC-721,注册模式沿用 `
 1. MetaBot 内完成:发行专辑 → mint ≥2 个 NFT(其一后补 item_desc)→ 转移给另一地址,全程 MVC;BTC 侧以回填数据做只读验收。
 2. 联调:以 `IDBOTS_MAN_P2P_LOCAL_BASE` 指向测试 man-p2p 节点,或按 §2 契约 mock;生产验收以 manapi.metaid.io 上线 `/api/mrc721/*` 后为准。
 3. 详情页正确展示:当前归属、完整转移路径、发行者、真伪标识(含一个第三方铸造样例展示"第三方铸造"标识)。
-4. 交易(若 V1.1 同期,模型 A):挂单 → 付款 → 卖家转移 NFT → `item/transfers` 确认交割,流程闭环。
+4. 交易(若 V1.1 同期,原子交换):卖家挂单 → 买家拿凭证购买 → 一笔交易完成付款+过户 → `item/transfers` 确认交割,流程闭环;另验一张"挂单后 NFT 已转移"的凭证被买前校验拒绝。
 
 ## 7. 后续规划(非本期)
 
