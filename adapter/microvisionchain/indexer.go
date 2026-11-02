@@ -154,8 +154,9 @@ func (indexer *Indexer) CatchPins(blockHeight int64) (pinInscriptions *[]*pin.Pi
 		return
 	}
 	//fmt.Println("GetBlock Data from Node:", time.Since(st))
-	//indexer.Block = blockMsg
-	//block := blockMsg.(*wire.MsgBlock)
+	// CatchTransfer / CatchNativeMrc20Transfer 依赖 indexer.Block 读取当前块,
+	// 此前只有废弃的 _bak 路径赋值,导致转移检测不可用(对齐 bitcoin 适配器行为)
+	indexer.Block = blockMsg
 
 	timestamp := blockMsg.Header.Timestamp.Unix()
 	blockHash := blockMsg.BlockHash().String()
@@ -245,6 +246,10 @@ func (indexer *Indexer) CatchMempoolPins(txList []interface{}) (pinInscriptions 
 }
 func (indexer *Indexer) CatchTransfer(idMap map[string]string) (trasferMap map[string]*pin.PinTransferInfo) {
 	trasferMap = make(map[string]*pin.PinTransferInfo)
+	if indexer.Block == nil {
+		// Block 未赋值时跳过本块转移检测(CatchPins 正常流程会赋值;防御异常调用顺序导致 nil 断言 panic)
+		return
+	}
 	block := indexer.Block.(*wire.MsgBlock)
 	for _, tx := range block.Transactions {
 		// 检测是否为熔化交易
@@ -746,6 +751,10 @@ func (indexer *Indexer) CatchNativeMrc20Transfer(blockHeight int64, utxoList []*
 			continue
 		}
 		pointMap[u.TxPoint] = append(pointMap[u.TxPoint], u)
+	}
+	if indexer.Block == nil {
+		// Block 未赋值时跳过(同 CatchTransfer 的防御;正常流程 CatchPins 会赋值)
+		return nil
 	}
 	block := indexer.Block.(*wire.MsgBlock)
 	t := block.Header.Timestamp.Unix()

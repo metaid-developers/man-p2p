@@ -15,23 +15,28 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
+// ResolvePinLookupKey 把花费 outpoint("txid:idx")解析为可直查的 pin 主键:
+// 先做 ":"→"i" 归一化,再经 PinAliasDb 解析转移别名(转移后 pin 主键保持
+// 创世 id 不变,而 pin.Output 指向新 outpoint,别名由 UpdateTransferPin 写入)。
+func (db *Database) ResolvePinLookupKey(outpoint string) string {
+	key := strings.Replace(outpoint, ":", "i", -1)
+	if db != nil && db.PinAliasDb != nil {
+		if canonical, err := db.GetPinAlias(key); err == nil && canonical != "" {
+			return canonical
+		}
+	}
+	return key
+}
+
 func (db *Database) GetPinListByIdList(outputList []string, batchSize int, replace bool) (transferCheck []*pin.PinInscription, err error) {
-	// num := len(transferCheck)
-	// for i := 0; i < num; i += batchSize {
-	// 	end := i + batchSize
-	// 	if end > num {
-	// 		end = num
-	// 	}
-	// 	vals := db.BatchGetPinListByKeys(outputList[i:end], replace)
-	// 	for _, val := range vals {
-	// 		var pinNode pin.PinInscription
-	// 		err := sonic.Unmarshal(val, &pinNode)
-	// 		if err == nil {
-	// 			transferCheck = append(transferCheck, &pinNode)
-	// 		}
-	// 	}
-	// }
-	vals := db.BatchGetPinListByKeys(outputList, replace)
+	// 先把 outpoint 解析为 pin 主键(归一化 + 转移别名),否则:
+	// 1) 冒号形态的 outpoint 查不到 "i" 形态的 pin 主键;
+	// 2) 转移过的 pin 其新 outpoint 与创世主键不同,二代及以后的转移无法识别。
+	resolvedKeys := make([]string, len(outputList))
+	for i, key := range outputList {
+		resolvedKeys[i] = db.ResolvePinLookupKey(key)
+	}
+	vals := db.BatchGetPinListByKeys(resolvedKeys, replace)
 	for _, val := range vals {
 		var pinNode pin.PinInscription
 		err := sonic.Unmarshal(val, &pinNode)
@@ -44,8 +49,10 @@ func (db *Database) GetPinListByIdList(outputList []string, batchSize int, repla
 
 func (db *Database) UpdateTransferPin(trasferMap map[string]*pin.PinTransferInfo) (err error) {
 	var updateList []pin.PinInscription
+	aliasPairs := make(map[string]string)
 	for id, info := range trasferMap {
-		val, err := db.GetPinByKey(id)
+		// 花费 outpoint 是冒号形态,pin 主键是 "i" 形态,且转移过的 pin 需经别名回查
+		val, err := db.GetPinByKey(db.ResolvePinLookupKey(id))
 		if err != nil {
 			continue
 		}
@@ -68,13 +75,20 @@ func (db *Database) UpdateTransferPin(trasferMap map[string]*pin.PinTransferInfo
 			pinNode.Offset = info.Offset
 			pinNode.Output = info.Output
 			pinNode.OutputValue = info.OutputValue
+			// 写新 outpoint → 创世主键 的转移别名,保证同一条 pin 的后续转移仍可被识别
+			if info.Output != "" {
+				aliasPairs[strings.Replace(info.Output, ":", "i", -1)] = pinNode.Id
+			}
 		}
 		updateList = append(updateList, pinNode)
 	}
 	if len(updateList) > 0 {
 		err = db.BatchInsertPins(updateList)
+		if err != nil {
+			return
+		}
 	}
-	return
+	return db.BatchSetPinAliases(aliasPairs)
 }
 func (db *Database) BatchUpdatePins(pins []*pin.PinInscription) (err error) {
 	for _, oldPin := range pins {
