@@ -35,6 +35,7 @@ func main() {
 	dataDir := flag.String("data-dir", "", "Pebble 数据目录(快照)")
 	chain := flag.String("chain", "", "只回填指定链(默认全部)")
 	dryRun := flag.Bool("dry-run", false, "只扫描统计,不写入")
+	replayTransfers := flag.String("replay-transfers", "", "定向重放转移记录 JSON 文件(数组:pinId/transferHeight/transferTime/transferTx/fromAddress/toAddress),修复后回填历史转移用")
 	flag.Parse()
 	if *dataDir == "" {
 		flag.Usage()
@@ -45,13 +46,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("detect shards: %v", err)
 	}
-	log.Printf("data-dir=%s shards=%d dry-run=%v chain=%q", *dataDir, shardNum, *dryRun, *chain)
+	log.Printf("data-dir=%s shards=%d dry-run=%v chain=%q replay-transfers=%q", *dataDir, shardNum, *dryRun, *chain, *replayTransfers)
 
 	db, err := pebblestore.NewDataBase(*dataDir, shardNum)
 	if err != nil {
 		log.Fatalf("open pebble: %v", err)
 	}
 	defer db.Close()
+
+	// 定向转移重放模式:不扫描,只按给定记录回填(服务须已停止,pebble 单写者)
+	if *replayTransfers != "" {
+		replayTransfersFile(db, *replayTransfers)
+		return
+	}
 
 	// 1. 扫描 pins 分片,收集 /nft/mrc721 create pin(主表每 pinId 单条,即最新记录)
 	matched := scanPins(db, shardNum, *chain)
@@ -245,6 +252,134 @@ func genesisMetaId(address, fallback string) string {
 		return fallback
 	}
 	return common.GetMetaIdByAddress(address)
+}
+
+// replayTransfersFile 定向重放历史转移(JSON 数组),修复 2026-11-02 三笔 MRC721
+// 转移未被识别一类的历史数据。流程:
+//  1. UpdateTransferPin 修复 pin 主记录(owner/output/isTransfered + 新 outpoint 别名)
+//  2. Mrc721BackfillRunTransfers 更新 mrc721 聚合(owner/transferCount/转移历史)
+//  幂等:重复执行不产生重复读数(mrc721 转移历史按 pinId+height+txid 去重)。
+func replayTransfersFile(db *pebblestore.Database, path string) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("read %s: %v", path, err)
+	}
+	var records []pin.PinTransferHistory
+	if err := sonic.Unmarshal(raw, &records); err != nil {
+		log.Fatalf("parse %s: %v", path, err)
+	}
+	if len(records) == 0 {
+		fmt.Println("no transfer records")
+		return
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].TransferHeight != records[j].TransferHeight {
+			return records[i].TransferHeight < records[j].TransferHeight
+		}
+		return records[i].TransferTx < records[j].TransferTx
+	})
+
+	pd := &man.PebbleData{Database: db}
+
+	// 1. pin 主记录修复:transferMap 以 pin 当前 outpoint 为键
+	//    (创世 pin 从 pinId 尾部 "i<idx>" 还原;转移过的 pin 用其记录的 Output)
+	transferMap := make(map[string]*pin.PinTransferInfo, len(records))
+	pinIdByOutput := make(map[string]string, len(records))
+	for _, r := range records {
+		outpoint := currentOutpoint(db, r.PinId)
+		if outpoint == "" {
+			log.Printf("skip: pin %s not found", r.PinId)
+			continue
+		}
+		transferMap[outpoint] = &pin.PinTransferInfo{
+			Address:     r.ToAddress,
+			FromAddress: r.FromAddress,
+			Location:    r.TransferTx,
+			Output:      outpointToTxOutput(r.TransferTx),
+		}
+		pinIdByOutput[outpoint] = r.PinId
+	}
+	if err := db.UpdateTransferPin(transferMap); err != nil {
+		log.Printf("UpdateTransferPin: %v", err)
+	}
+
+	// 2. mrc721 聚合回填(内部按 (pinId,height,txid) 幂等)
+	historyPtrs := make([]*pin.PinTransferHistory, len(records))
+	for i := range records {
+		historyPtrs[i] = &records[i]
+	}
+	pd.Mrc721BackfillRunTransfers("backfill", historyPtrs)
+
+	// 3. 验证读数
+	for _, r := range records {
+		item, err := db.GetMrc721Item(r.PinId)
+		if err != nil || item == nil {
+			fmt.Printf("  pin=%s: no mrc721 item\n", r.PinId)
+			continue
+		}
+		historyCount := 0
+		db.IterateMrc721ItemTransfers(r.PinId, func(tr *pebblestore.Mrc721ItemTransfer) bool {
+			historyCount++
+			return true
+		})
+		pinNode, _ := db.GetPinInscriptionByKey(db.ResolvePinLookupKey(outpointToTxOutput(r.TransferTx)))
+		fmt.Printf("  pin=%s owner=%s transferCount=%d history=%d pinRecord(addr=%s isTransfered=%v)\n",
+			r.PinId, item.OwnerAddress, item.TransferCount, historyCount,
+			shortAddr(pinOwner(&pinNode)), pinTransferred(&pinNode))
+	}
+	fmt.Println("replay complete")
+}
+
+// currentOutpoint 返回 pin 当前记录的 outpoint;查不到返回空。
+func currentOutpoint(db *pebblestore.Database, pinId string) string {
+	node, err := db.GetPinInscriptionByKey(pinId)
+	if err != nil || node.Id == "" {
+		// 主键直查失败再试 outpoint 形态(创世 outpoint = pinId 的 "i<idx>" 换回 ":")
+		node, err = db.GetPinInscriptionByKey(db.ResolvePinLookupKey(OutpointFromPinId(pinId)))
+		if err != nil || node.Id == "" {
+			return ""
+		}
+	}
+	if node.Output != "" {
+		return node.Output
+	}
+	return OutpointFromPinId(pinId)
+}
+
+// OutpointFromPinId 把 "txidi<idx>" 形态的 pinId 还原为 "txid:<idx>"(txid 为 hex,不含 'i')。
+func OutpointFromPinId(pinId string) string {
+	idx := strings.LastIndex(pinId, "i")
+	if idx < 0 {
+		return pinId
+	}
+	return pinId[:idx] + ":" + pinId[idx+1:]
+}
+
+// outpointToTxOutput 从转移 tx 构造新 outpoint(实盘转移把 pin 放在 vout[0])。
+func outpointToTxOutput(transferTx string) string {
+	txPart := transferTx
+	if i := strings.Index(transferTx, ":"); i > 0 {
+		txPart = transferTx[:i]
+	}
+	return txPart + ":0"
+}
+
+func pinOwner(n *pin.PinInscription) string {
+	if n == nil {
+		return ""
+	}
+	return n.Address
+}
+
+func pinTransferred(n *pin.PinInscription) bool {
+	return n != nil && n.IsTransfered
+}
+
+func shortAddr(a string) string {
+	if len(a) > 14 {
+		return a[:14] + "..."
+	}
+	return a
 }
 
 func countPrefix(db *pebble.DB, prefix string) int {

@@ -93,9 +93,10 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 		handNotifcation(pinNode)
 	}
 	//处理转移操作
-	if common.Config.Sync.IsFullNode {
-		pd.handleTransfer(chainName, *txInList, height)
-	}
+	// 转移检测是索引核心能力,不再受 is_full_node 门控:该配置会被
+	// is_full_node flag 的默认值"0"无条件反向覆盖(common/config.go),
+	// 生产实际始终为 false,转移检测从未执行过(2026-11-02 MRC721 转移零识别根因)。
+	pd.handleTransfer(chainName, *txInList, height)
 
 	// 处理 MRC20（只有当 MRC20 进度已追上时才处理）
 	if Mrc20RuntimeEnabled() {
