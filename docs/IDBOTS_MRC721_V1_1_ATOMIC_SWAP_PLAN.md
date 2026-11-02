@@ -4,6 +4,7 @@
 > 上游:`docs/IDBOTS_MRC721_REQUIREMENTS.md` §5.1(模型 C 定稿)/ R4(交易流程)/ R6(工具清单)
 > 前置:V1 已合并 IDBots main(`10a2ac5c`);man-p2p 生产 `d7422de`(`/api/mrc721/*` 含 camelCase 别名)
 > 本文是给 IDBots 开发 Agent 的实施输入,分支建议:`feat/mrc721-atomic-swap`(基于当时 main)
+> **Step 0(动工前冒烟)**:生态内无"简单 P2PKH 部分签名挂单"直接先例(metalet 系市场走合约锁两段式),TxComposer 原语已逐一核实存在(`unlockP2PKHInput` sigtype 参数/serialize 往返/appendInput;SIGHASH 常量齐全)——先用一笔小额(或 testnet)2-in/2-out ANYONECANPAY 交易完成"签→序列化→解析→追加输入→签全→广播→上链"全链路冒烟,验证 MVC mempool 对该 sigtype 的接受度,再铺开写正式 worker。
 
 ## 1. 目标与非目标
 
@@ -16,18 +17,25 @@
 一笔交易,五类构件:
 
 ```
-输入0: NFT outpoint(卖家签名)          —— 铁律:必须输入 0
+输入0: NFT outpoint(卖家签名,sigtype = SIGHASH_ALL|FORKID|ANYONECANPAY)
 输入1+: 买家付款 UTXO(买家签名,买家钱包选择)
 输出0: NFT → buyerAddress               —— 铁律:必须输出 0
 输出1: priceSats → sellerAddress
-输出2+: 买家找零(买家钱包生成)
-手续费: 买家承担(从买家输入中扣)
+手续费: 买家承担 = 买家输入总额 − 全部输出(无找零输出,超额进矿工费)
 ```
+
+**Sighash 设计(关键,勿改)**:
+- 卖家用 `SIGHASH_ALL|FORKID|ANYONECANPAY`:ALL 锁死两个固定输出(卖家拿不到钱或 NFT 被改向都会使签名失效),ACP 允许买家追加输入。
+- **不得**用 `SIGHASH_SINGLE|ANYONECANPAY`:input0 恰与 output0(NFT)配对,价格输出不被卖家签名覆盖——恶意买家客户端可构造去掉价格输出的交易白拿 NFT。
+- **买家 worker 不得追加任何输出**(会使卖家签名失效):找零以"选最小够用 UTXO、超额进费"消化;钱包按金额升序选单张最小 sufficient UTXO,展示实际有效费率。
+- MVC 为 forkid 链:sigtype 必须 OR `SIGHASH_FORKID`(mvc 库常量齐全,已核)。
 
 - 铁律依据:man-p2p 索引器 `GetOWnerAddress` 按输入 0 → 输出 0 解析新归属(与 V1 `mrc721_transfer` 同一条已验证规则)。
 - 原子性:交易要么整笔确认(钱/NFT 同时换手),要么整笔失败(买家可在确认前花掉付款输入,整笔作废,零损失)。
 - 多挂单竞争:同一 NFT 的多张挂单,先广播先成交;其余因输入已被花而全部失效。
 - 挂单失效:卖家挂单后自行转走 NFT → 买前校验(§4)拒绝,凭证自然作废。
+
+**与 BTC PSBT 的对应关系(消解 taproot 疑虑)**:部分签名只需"按输入独立 sighash + 可序列化交易容器",均为 P2PKH 时代能力;taproot 不在路径上(MVC 主流 P2PKH 反而是部分签名最简场景)。MVC 无 bIP-174 线格式,等价物 = `TxComposer.serialize()`(IDBots TokenSell/NftTrade worker 已有 serialize 链式往返先例)+ §3 listing JSON 信封。
 
 ## 3. 挂单凭证(listing tuple)V1 契约
 
@@ -41,7 +49,8 @@
   "sellerAddress": "...",
   "buyerAddress": "...",                // 挂单时指定买家;泛化"任意买家"留后续版本
   "priceSats": 22000,                   // ≥ 22000(对齐 NftManager 惯例下限)
-  "partialTx": "<mvc partial tx hex>",  // TxComposer 序列化,仅输入0已解锁
+  "partialTx": "<TxComposer.serialize()>", // 仅输入0已解锁,sigtype=SIGHASH_ALL|FORKID|ANYONECANPAY
+  "sigtype": 67,                        // ALL|FORKID|ACP 实际值以 mvc.Signature 常量计算,写入凭证供校验
   "feeRate": 2,                         // 记录卖方建议费率,实际以买家构建为准
   "createdAt": 1700000000,
   "expiresAt": 1700086400               // 链下约定,仅展示与本地过滤
@@ -52,8 +61,8 @@
 
 ## 4. 买前硬校验(必须全部通过才可签)
 
-1. 解析 `partialTx`:输入 0 == listing.outpoint;输出 0 → buyerAddress;存在输出 == priceSats → sellerAddress;无多余对卖家有利的改动(全量输出审计)。
-2. 输入 0 解锁脚本验签通过(卖家签名有效)。
+1. 解析 `partialTx`(`TxComposer.deserialize`):输入 0 == listing.outpoint;输出 0 → buyerAddress;存在输出 == priceSats → sellerAddress;无多余输出(全量输出审计);输入 0 解锁脚本的 **sigtype 含 ALL|FORKID|ACP**(防 SINGLE 变体漏洞)。
+2. 输入 0 解锁脚本验签通过(卖家签名有效,以其声明 prevout(satoshis/address) 重验)。
 3. 索引器 `item/info?pinId=`:当前 owner == sellerAddress 且 `output` == outpoint 且 `burned != true`。
 4. 节点未花校验:outpoint 未被花费(复用 mvcSpend 的 UTXO/花费记录机制)。
 5. 校验失败必须给教学性错误(沿用 V1 `transferMrc721Item` 的 "unindexed item" 提示模式),明确指出哪条不满足。
@@ -64,8 +73,8 @@
 
 | 组件 | 位置 | 职责 |
 |---|---|---|
-| `buildMvc721SellPartialTxWorker` | `src/main/libs/`(新文件,pattern 同 `buildMvcNftTradeRawTxWorker`) | 卖家侧:`TxComposer` 组装(输入0=NFT outpoint;输出0/1 按 §2)→ 仅 `unlockP2PKHInput(0)` → 序列化 partialTx;**不得**触碰钱包其它 UTXO |
-| `completeMvc721BuyTxWorker` | `src/main/libs/`(新文件) | 买家侧:解析 partialTx → 校验(§4 的 1-2)→ `pickUtxo` 选付款输入覆盖 price+fee → 加找零输出 → 签全部买家输入 → compose → 广播(wallet-api v3,同 V1 通道)→ 返回 txid + spentOutpoints(纳入 mvcSpend 会话记录) |
+| `buildMvc721SellPartialTxWorker` | `src/main/libs/`(新文件,pattern 同 `buildMvcNftTradeRawTxWorker`) | 卖家侧:`TxComposer` 组装(输入0=NFT outpoint;输出0/1 按 §2)→ `unlockP2PKHInput(pk, 0, SIGHASH_ALL\|FORKID\|ANYONECANPAY)` → `serialize()` 返回 composer 串;**不得**触碰钱包其它 UTXO |
+| `completeMvc721BuyTxWorker` | `src/main/libs/`(新文件) | 买家侧:`TxComposer.deserialize` 解析 → 校验(§4 的 1-2)→ `pickUtxo` 按金额升序选**单张最小 sufficient** 付款 UTXO → `appendP2PKHInput`(**严禁 appendOutput**)→ 解锁买家输入 → `fee = 买家输入总额 − 全部输出`(无找零,超额进费;展示实际有效费率,超额比例异常时拒绝)→ compose → 广播(wallet-api v3,同 V1 通道)→ 返回 txid + spentOutpoints(纳入 mvcSpend 会话记录) |
 | `verifyMrc721Listing` | `mrc721Service.ts`(导出,供 buy 与 sell_orders 共用) | §4 全量校验;索引器读取走既有 `fetchMrc721*` |
 | service 编排 | `mrc721Service.ts` | `sellMrc721Item({itemPinId, buyerAddress, priceSats, feeRate})`(内部先 `fetchMrc721ItemInfo` 取 outpoint 并校验归属/burned)、`buyMrc721Listing({listing})`、`recordMrc721Listing`/`listMrc721MySellOrders`(sqlite 存取 + 逐张复核) |
 | agent tools ×3 | `mrc721AgentTools.ts` | `mrc721_sell`(参数 itemPinId/buyer/priceSats;返回凭证全文+提示"把凭证交给买家")、`mrc721_buy`(参数 listing 凭证 JSON;返回 txid+交割确认指引)、`mrc721_sell_orders`(无参列本地挂单并复核,标注有效/失效原因) |
@@ -80,7 +89,8 @@
 |---|---|
 | 挂单后卖家把 NFT 转走了 | 买前校验第 3 条失败 → 拒绝并提示"NFT 已不在卖家手中" |
 | 两张挂单并发成交 | 先广播者赢;后广播者节点拒绝(输入已花),钱包按既有 broadcast 错误处理 |
-| 买家余额不足 / 找零小于 dust | worker 内预检,失败在签名前(沿 AC4 "no half-done state" 惯例) |
+| 买家余额不足 / 无 suitable UTXO / 超额进费比例异常(如 >3× 常规费) | worker 内预检,失败在签名前(沿 AC4 "no half-done state" 惯例);无找零模式下换更小额 UTXO 即可收敛 |
+| 卖家签名 sigtype 被改为 SINGLE 变体(价格输出不受保护) | 校验第 1 条的 sigtype 检查拒绝;买前校验硬编码期望 sigtype |
 | 广播后未确认 | 买家可双花付款输入,整笔作废;不设超时机制(链下 expiresAt 仅过滤展示) |
 | 卖家对同一 NFT 重复挂单 | 允许;都指向同一输入,先广播先成交 |
 | 价格 < 22000 sat | 工具层拒绝(对齐 `MVC_NFT_MIN_SELL_PRICE_SATS`) |
@@ -88,7 +98,7 @@
 
 ## 7. 测试计划(pattern 同 V1:service mock 索引器 / tools 注册与拒答 / worker 交易形状断言)
 
-1. **worker 形状断言**:sell partial——输入恰 1 个且为 NFT outpoint、输出 0 → buyer、输出 1 == price → seller、仅输入 0 有解锁脚本;buy complete——注入买家输入后全签名、找零正确、费率生效。
+1. **worker 形状断言**:sell partial——输入恰 1 个且为 NFT outpoint、输出 0 → buyer、输出 1 == price → seller、仅输入 0 有解锁脚本、sigtype == ALL|FORKID|ACP;buy complete——仅追加输入未追加输出、费 = 输入−输出、篡改任一输出后卖家签名验签失败。
 2. **校验矩阵**:`verifyMrc721Listing` 对以下逐一拒绝——篡改价格输出、篡改买家输出、卖家签名无效、索引器 owner 不符、outpoint 已花、burned、价格低于下限。
 3. **service 编排**:mock 索引器,_sell 先查归属再构建、_buy 校验失败不触碰钱包、成功路径返回 txid 且 spentOutpoints 入会话记录。
 4. **tools**:三个工具注册、参数校验、教学性错误文案。
