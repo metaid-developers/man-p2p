@@ -259,6 +259,17 @@ func (db *Database) GetMrc721Item(itemPinId string) (*Mrc721Item, error) {
 	return &item, nil
 }
 
+// IterateMrc721Items 全量遍历条目主表(离线回填的 txOutput 修补/断言用)。
+func (db *Database) IterateMrc721Items(fn func(item *Mrc721Item) bool) error {
+	return mrc721IteratePrefix(db.Mrc721Db, mrc721ItemKeyPrefix, func(_ string, value []byte) bool {
+		var item Mrc721Item
+		if err := sonic.Unmarshal(value, &item); err != nil {
+			return true
+		}
+		return fn(&item)
+	})
+}
+
 // AppendMrc721CollectionItem 记录条目在专辑内的收录序。
 func (db *Database) AppendMrc721CollectionItem(collectionName string, seq int64, itemPinId string) error {
 	return db.Mrc721Db.Set([]byte(mrc721CollItemKey(collectionName, seq, itemPinId)), []byte{}, pebble.Sync)
