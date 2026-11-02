@@ -22,6 +22,8 @@ func (pd *PebbleData) Mrc721BackfillRunPins(chainName string, pins []*pin.PinIns
 }
 
 // Mrc721BackfillRunTransfers 重放历史转移(须按 (height, time) 升序;PinId 与 itemPinId 同为 txidiN 格式)。
+// 值语义:Output/OutputValue 转移后新输出;TransferDb 旧记录无值(OutputValue=0),
+// 由 reconcile/repair 按 pin 主记录校正,断言拒绝值级仍为 0 的未熔化条目。
 func (pd *PebbleData) Mrc721BackfillRunTransfers(chainName string, histories []*pin.PinTransferHistory) {
 	for _, h := range histories {
 		if h.PinId == "" {
@@ -33,6 +35,7 @@ func (pd *PebbleData) Mrc721BackfillRunTransfers(chainName string, histories []*
 				Address:     h.ToAddress,
 				FromAddress: h.FromAddress,
 				Location:    h.TransferTx,
+				OutputValue: h.OutputValue,
 			},
 		}
 		pd.mrc721TransferHook(chainName, h.TransferHeight, transferMap, map[string]string{key: h.PinId}, h.TransferTime)
@@ -73,17 +76,18 @@ func (pd *PebbleData) Mrc721BackfillReconcileOwner(itemPinId, currentOwner, outp
 }
 
 // Mrc721BackfillRepairOutputs 以 pin 主记录为准,为「转移过(transferCount>0)但当前
-// outpoint 为空」的条目补写 Output(-replay-transfers 模式的历史回填数据缺
-// 「当前可花 UTXO 指针」,不补会导致二级转移断链)。pin 主记录缺失或同样无 outpoint
-// 的条目留给 Mrc721BackfillAssertOutputs 上报。返回修补的条目数。
+// outpoint 为空或值级为 0」的条目补写 Output/OutputValue(-replay-transfers 模式的
+// 历史回填数据缺「当前可花 UTXO 指针+值」,不补会导致二级转移断链:下游转移工具门
+// 为 outputValue>0)。pin 主记录缺失、无 outpoint 或值同样为 0 的条目留给
+// Mrc721BackfillAssertOutputs 上报。返回修补的条目数。
 func (pd *PebbleData) Mrc721BackfillRepairOutputs() int {
 	repaired := 0
 	_ = pd.Database.IterateMrc721Items(func(item *pebblestore.Mrc721Item) bool {
-		if item.TransferCount <= 0 || item.Burned || item.Output != "" {
+		if item.TransferCount <= 0 || item.Burned || (item.Output != "" && item.OutputValue > 0) {
 			return true
 		}
 		node, err := pd.Database.GetPinInscriptionByKey(item.ItemPinId)
-		if err != nil || node.Id == "" || node.Output == "" {
+		if err != nil || node.Id == "" || node.Output == "" || node.OutputValue <= 0 {
 			return true
 		}
 		if pd.Mrc721BackfillReconcileOwner(item.ItemPinId, node.Address, node.Output, node.OutputValue, node.Status == pin.PinStatusMeltdown) {
@@ -95,11 +99,12 @@ func (pd *PebbleData) Mrc721BackfillRepairOutputs() int {
 }
 
 // Mrc721BackfillAssertOutputs 防回归断言:transferCount>0 且未熔化的条目必须有当前
-// outpoint,违例条目列表非空时回填任务应报错退出。熔化条目无可花 UTXO,不在断言范围。
+// outpoint 且值级非 0(下游转移工具门为 outputValue>0,「指针绿、值假绿」同样断链),
+// 违例条目列表非空时回填任务应报错退出。熔化条目无可花 UTXO,不在断言范围。
 func (pd *PebbleData) Mrc721BackfillAssertOutputs() []string {
 	var missing []string
 	_ = pd.Database.IterateMrc721Items(func(item *pebblestore.Mrc721Item) bool {
-		if item.TransferCount > 0 && !item.Burned && item.Output == "" {
+		if item.TransferCount > 0 && !item.Burned && (item.Output == "" || item.OutputValue <= 0) {
 			missing = append(missing, item.ItemPinId)
 		}
 		return true
