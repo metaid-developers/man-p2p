@@ -134,6 +134,15 @@ func main() {
 	}
 	log.Printf("ownership reconcile done: %d items", reconciled)
 
+	// 5. 防回归断言:transferCount>0 的条目必须有当前 outpoint(txOutput),
+	//    否则二级转移断链,回填任务报错退出
+	if missing := pd.Mrc721BackfillAssertOutputs(); len(missing) > 0 {
+		for _, id := range missing {
+			log.Printf("assert fail: item %s transferCount>0 but txOutput empty", id)
+		}
+		log.Fatalf("txOutput assertion failed: %d items", len(missing))
+	}
+
 	cols, total, err := db.ListMrc721Collections(0, 1<<30)
 	if err != nil {
 		log.Printf("count collections: %v", err)
@@ -258,7 +267,9 @@ func genesisMetaId(address, fallback string) string {
 // 转移未被识别一类的历史数据。流程:
 //  1. UpdateTransferPin 修复 pin 主记录(owner/output/isTransfered + 新 outpoint 别名)
 //  2. Mrc721BackfillRunTransfers 更新 mrc721 聚合(owner/transferCount/转移历史)
-//  幂等:重复执行不产生重复读数(mrc721 转移历史按 pinId+height+txid 去重)。
+//  3. Mrc721BackfillRepairOutputs 以 pin 主记录补写聚合缺失的当前 outpoint(txOutput),
+//     并断言 transferCount>0 的条目 txOutput 非空,否则报错退出
+//     幂等:重复执行不产生重复读数(mrc721 转移历史按 pinId+height+txid 去重)。
 func replayTransfersFile(db *pebblestore.Database, path string) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -310,7 +321,19 @@ func replayTransfersFile(db *pebblestore.Database, path string) {
 	}
 	pd.Mrc721BackfillRunTransfers("backfill", historyPtrs)
 
-	// 3. 验证读数
+	// 3. txOutput 补写 + 防回归断言:历史回填数据缺「当前可花 UTXO 指针」,
+	//    以 pin 主记录(第 1 步已修)为准补正;仍缺失则报错退出
+	if repaired := pd.Mrc721BackfillRepairOutputs(); repaired > 0 {
+		log.Printf("txOutput repair: %d items", repaired)
+	}
+	if missing := pd.Mrc721BackfillAssertOutputs(); len(missing) > 0 {
+		for _, id := range missing {
+			log.Printf("assert fail: item %s transferCount>0 but txOutput empty", id)
+		}
+		log.Fatalf("txOutput assertion failed: %d items", len(missing))
+	}
+
+	// 4. 验证读数
 	for _, r := range records {
 		item, err := db.GetMrc721Item(r.PinId)
 		if err != nil || item == nil {
@@ -323,8 +346,8 @@ func replayTransfersFile(db *pebblestore.Database, path string) {
 			return true
 		})
 		pinNode, _ := db.GetPinInscriptionByKey(db.ResolvePinLookupKey(outpointToTxOutput(r.TransferTx)))
-		fmt.Printf("  pin=%s owner=%s transferCount=%d history=%d pinRecord(addr=%s isTransfered=%v)\n",
-			r.PinId, item.OwnerAddress, item.TransferCount, historyCount,
+		fmt.Printf("  pin=%s owner=%s transferCount=%d history=%d txOutput=%s pinRecord(addr=%s isTransfered=%v)\n",
+			r.PinId, item.OwnerAddress, item.TransferCount, historyCount, item.Output,
 			shortAddr(pinOwner(&pinNode)), pinTransferred(&pinNode))
 	}
 	fmt.Println("replay complete")
