@@ -35,18 +35,26 @@ func main() {
 	dataDir := flag.String("data-dir", "", "Pebble 数据目录(快照)")
 	chain := flag.String("chain", "", "只回填指定链(默认全部)")
 	dryRun := flag.Bool("dry-run", false, "只扫描统计,不写入")
-	replayTransfers := flag.String("replay-transfers", "", "定向重放转移记录 JSON 文件(数组:pinId/transferHeight/transferTime/transferTx/fromAddress/toAddress),修复后回填历史转移用")
+	replayTransfers := flag.String("replay-transfers", "", "定向重放转移记录 JSON 文件(数组:pinId/transferHeight/transferTime/transferTx/fromAddress/toAddress[/outputValue]),修复后回填历史转移用")
+	fixLedgerTxid := flag.Bool("fix-ledger-txid", false, "把不可被链解析的转移指针改写为账本口径 txid(需 -mvc-rpc-*,配合短停机)")
+	mvcRpcHost := flag.String("mvc-rpc-host", "", "MVC 节点 RPC host(host:port,账本 txid 解析/块扫描)")
+	mvcRpcUser := flag.String("mvc-rpc-user", "", "MVC 节点 RPC user")
+	mvcRpcPass := flag.String("mvc-rpc-pass", "", "MVC 节点 RPC pass")
 	flag.Parse()
 	if *dataDir == "" {
 		flag.Usage()
 		log.Fatal("-data-dir required")
+	}
+	if *fixLedgerTxid && *mvcRpcHost == "" {
+		flag.Usage()
+		log.Fatal("-fix-ledger-txid requires -mvc-rpc-host/user/pass")
 	}
 
 	shardNum, err := detectShardNum(*dataDir)
 	if err != nil {
 		log.Fatalf("detect shards: %v", err)
 	}
-	log.Printf("data-dir=%s shards=%d dry-run=%v chain=%q replay-transfers=%q", *dataDir, shardNum, *dryRun, *chain, *replayTransfers)
+	log.Printf("data-dir=%s shards=%d dry-run=%v chain=%q replay-transfers=%q fix-ledger-txid=%v", *dataDir, shardNum, *dryRun, *chain, *replayTransfers, *fixLedgerTxid)
 
 	db, err := pebblestore.NewDataBase(*dataDir, shardNum)
 	if err != nil {
@@ -57,6 +65,13 @@ func main() {
 	// 定向转移重放模式:不扫描,只按给定记录回填(服务须已停止,pebble 单写者)
 	if *replayTransfers != "" {
 		replayTransfersFile(db, *replayTransfers)
+		return
+	}
+
+	// 指针口径修复模式:扫描全部转移过条目,不可被链解析的指针经块扫描映射为账本 txid
+	if *fixLedgerTxid {
+		rpc := newMvcRpc(*mvcRpcHost, *mvcRpcUser, *mvcRpcPass)
+		fixLedgerTxidMode(db, rpc)
 		return
 	}
 

@@ -316,6 +316,14 @@ func (indexer *Indexer) IsMeltdownTransaction(tx *wire.MsgTx, idMap map[string]s
 }
 func (indexer *Indexer) GetOWnerAddress(inputId string, tx *wire.MsgTx) (info *pin.PinTransferInfo, err error) {
 	//fmt.Println("tx:", tx.TxHash().String(), inputId)
+	// 转移后的当前 UTXO 指针必须用账本口径 txid（与链上可花费引用、/tx/ 查询一致）,
+	// 不能用 wire 的 sha256d TxHash —— MVC 账本对 version≥10 的新格式交易用重排后
+	// 的 txid(GetNewHash)，sha256d 口径指针在链上不可解析，下游按指针构建输入会报
+	// [-25] Missing inputs。genesis 路径(CatchPinsByTx)已用 GetNewHash，此处对齐。
+	ledgerTxid, err := GetNewHash(tx)
+	if err != nil {
+		return
+	}
 	info = &pin.PinTransferInfo{}
 	firstInputId := fmt.Sprintf("%s:%d", tx.TxIn[0].PreviousOutPoint.Hash, tx.TxIn[0].PreviousOutPoint.Index)
 	// !!! Accelerate indexing, all assigned to the first
@@ -326,9 +334,9 @@ func (indexer *Indexer) GetOWnerAddress(inputId string, tx *wire.MsgTx) (info *p
 		} else if class.String() == "nulldata" {
 			info.Address = hex.EncodeToString(tx.TxOut[0].PkScript)
 		}
-		info.Location = fmt.Sprintf("%s:%d:%d", tx.TxHash().String(), 0, 0)
+		info.Location = fmt.Sprintf("%s:%d:%d", ledgerTxid, 0, 0)
 		info.Offset = 0
-		info.Output = fmt.Sprintf("%s:%d", tx.TxHash().String(), 0)
+		info.Output = fmt.Sprintf("%s:%d", ledgerTxid, 0)
 		info.OutputValue = tx.TxOut[0].Value
 		return
 	}
@@ -362,7 +370,7 @@ func (indexer *Indexer) GetOWnerAddress(inputId string, tx *wire.MsgTx) (info *p
 			} else if class.String() == "nulldata" {
 				info.Address = hex.EncodeToString(out.PkScript)
 			}
-			info.Output = fmt.Sprintf("%s:%d", tx.TxHash().String(), i)
+			info.Output = fmt.Sprintf("%s:%d", ledgerTxid, i)
 			//count offset
 			info.Location = fmt.Sprintf("%s:%d", info.Output, out.Value-(outputValue-inputValue))
 			info.Offset = uint64(i)

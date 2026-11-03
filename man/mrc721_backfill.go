@@ -2,6 +2,7 @@ package man
 
 import (
 	"log"
+	"strings"
 
 	"man-p2p/common"
 	"man-p2p/pebblestore"
@@ -110,4 +111,69 @@ func (pd *PebbleData) Mrc721BackfillAssertOutputs() []string {
 		return true
 	})
 	return missing
+}
+
+// Mrc721BackfillRelocateOutpoint 把条目的当前 outpoint 整体迁移到新 txid 口径
+// (MVC 实时路径曾按 sha256d 写转移指针,链上可花费引用用账本 txid,须改写):
+// 条目主记录、转移历史键(保证 -replay-transfers 按 (pinId,height,账本txid) 的幂等
+// 键与回填重放对齐)、pin 主记录 Output/Location、新 outpoint 别名一并迁移。
+// 输出值不变(由调用方保证正确);条目已指向 newOutpoint 时幂等返回 true。
+// 返回是否存在对应条目且已处理。
+func (pd *PebbleData) Mrc721BackfillRelocateOutpoint(itemPinId, newOutpoint string) bool {
+	item, err := pd.Database.GetMrc721Item(itemPinId)
+	if err != nil || item == nil {
+		return false
+	}
+	if item.Output == newOutpoint {
+		return true
+	}
+	oldTxid, _, _ := strings.Cut(item.Output, ":")
+	newTxid, _, _ := strings.Cut(newOutpoint, ":")
+
+	// 1. 转移历史换键:TxId 为旧口径的记录删除重写(其余记录不动)
+	var migrated []*pebblestore.Mrc721ItemTransfer
+	_ = pd.Database.IterateMrc721ItemTransfers(itemPinId, func(tr *pebblestore.Mrc721ItemTransfer) bool {
+		if tr.TxId == oldTxid {
+			cp := *tr
+			migrated = append(migrated, &cp)
+		}
+		return true
+	})
+	for _, tr := range migrated {
+		if err := pd.Database.DeleteMrc721ItemTransfer(itemPinId, tr.Height, tr.TxId); err != nil {
+			log.Printf("[MRC721] relocate %s: delete transfer %d/%s: %v", itemPinId, tr.Height, tr.TxId, err)
+			return false
+		}
+		tr.TxId = newTxid
+		if err := pd.Database.SaveMrc721ItemTransfer(tr); err != nil {
+			log.Printf("[MRC721] relocate %s: save transfer %d/%s: %v", itemPinId, tr.Height, tr.TxId, err)
+			return false
+		}
+	}
+
+	// 2. 条目主记录
+	item.Output = newOutpoint
+	if err := pd.Database.SaveMrc721Item(item); err != nil {
+		log.Printf("[MRC721] relocate %s: save item: %v", itemPinId, err)
+		return false
+	}
+
+	// 3. pin 主记录 Output/Location + 新 outpoint 别名
+	node, err := pd.Database.GetPinInscriptionByKey(itemPinId)
+	if err == nil && node.Id != "" {
+		node.Output = newOutpoint
+		if node.Location == oldTxid || strings.HasPrefix(node.Location, oldTxid+":") {
+			node.Location = newTxid + strings.TrimPrefix(node.Location, oldTxid)
+		}
+		if err := pd.Database.BatchInsertPins([]pin.PinInscription{node}); err != nil {
+			log.Printf("[MRC721] relocate %s: update pin record: %v", itemPinId, err)
+			return false
+		}
+		aliasKey := strings.Replace(newOutpoint, ":", "i", -1)
+		if err := pd.Database.BatchSetPinAliases(map[string]string{aliasKey: node.Id}); err != nil {
+			log.Printf("[MRC721] relocate %s: set alias: %v", itemPinId, err)
+			return false
+		}
+	}
+	return true
 }

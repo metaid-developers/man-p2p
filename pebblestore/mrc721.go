@@ -333,6 +333,11 @@ func (db *Database) GetMrc721ItemTransfer(itemPinId string, height int64, txId s
 	return &tr, nil
 }
 
+// DeleteMrc721ItemTransfer 删除转移历史记录(口径改写时换键用:删旧口径键、写新键)。
+func (db *Database) DeleteMrc721ItemTransfer(itemPinId string, height int64, txId string) error {
+	return db.Mrc721Db.Delete([]byte(mrc721ItemTransferKey(itemPinId, height, txId)), pebble.Sync)
+}
+
 // IterateMrc721ItemTransfers 按高度正序遍历某条目的转移历史。
 func (db *Database) IterateMrc721ItemTransfers(itemPinId string, fn func(tr *Mrc721ItemTransfer) bool) error {
 	prefix := mrc721ItemTransferPrefix + itemPinId + "&"
