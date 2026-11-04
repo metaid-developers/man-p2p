@@ -181,3 +181,27 @@ func (chain *BitcoinChain) GetTxSizeAndFees(txHash string) (fee int64, size int6
 	blockHash = tx.BlockHash
 	return
 }
+
+// GetTransactionStatus 交易状态:未确认(mempool)/已确认 + 确认数与区块信息。
+// 交易不存在或 RPC 异常时返回 error(mempool 交易 verbose 亦可见,Confirmations=0)。
+func (chain *BitcoinChain) GetTransactionStatus(txId string) (confirmed bool, confirmations int64, blockHash string, height int64, err error) {
+	hash, err := chainhash.NewHashFromStr(txId)
+	if err != nil {
+		return
+	}
+	tx, err := client.GetRawTransactionVerbose(hash)
+	if err != nil {
+		return
+	}
+	confirmations = int64(tx.Confirmations)
+	blockHash = tx.BlockHash
+	confirmed = confirmations > 0 && blockHash != ""
+	if confirmed {
+		if bh, bErr := chainhash.NewHashFromStr(blockHash); bErr == nil {
+			if blk, vErr := client.GetBlockVerbose(bh); vErr == nil {
+				height = blk.Height
+			}
+		}
+	}
+	return
+}

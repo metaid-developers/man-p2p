@@ -28,6 +28,9 @@ func (c *syncTestChain) GetMempoolTransactionList() ([]interface{}, error) {
 	c.calls++
 	return c.txList, c.err
 }
+func (c *syncTestChain) GetTransactionStatus(txId string) (bool, int64, string, int64, error) {
+	return false, 0, "", 0, nil
+}
 
 type syncTestIndexer struct {
 	pins  []*pin.PinInscription
@@ -50,6 +53,9 @@ func (i *syncTestIndexer) CatchMempoolPins(txList []interface{}) ([]*pin.PinInsc
 	return i.pins, i.txIns
 }
 func (i *syncTestIndexer) CatchTransfer(idMap map[string]string) map[string]*pin.PinTransferInfo {
+	return nil
+}
+func (i *syncTestIndexer) MempoolSpends(txList []interface{}, idMap map[string]string) map[string]*pin.PinTransferInfo {
 	return nil
 }
 func (i *syncTestIndexer) GetAddress(pkScript []byte) string      { return "" }

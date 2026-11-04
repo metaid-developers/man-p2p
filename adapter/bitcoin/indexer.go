@@ -128,6 +128,32 @@ func (indexer *Indexer) CatchTransfer(idMap map[string]string) (trasferMap map[s
 	return
 }
 
+// MempoolSpends mempool 转移检测:CatchTransfer 的 mempool 对应物,遍历给定交易
+// 而非 indexer.Block。
+func (indexer *Indexer) MempoolSpends(txList []interface{}, idMap map[string]string) (trasferMap map[string]*pin.PinTransferInfo) {
+	trasferMap = make(map[string]*pin.PinTransferInfo)
+	if len(idMap) == 0 {
+		return
+	}
+	for _, item := range txList {
+		tx, ok := item.(*wire.MsgTx)
+		if !ok {
+			continue
+		}
+		for _, in := range tx.TxIn {
+			id := fmt.Sprintf("%s:%d", in.PreviousOutPoint.Hash.String(), in.PreviousOutPoint.Index)
+			if fromAddress, ok := idMap[id]; ok {
+				info, err := indexer.GetOWnerAddress(id, tx)
+				if err == nil && info != nil {
+					info.FromAddress = fromAddress
+					trasferMap[id] = info
+				}
+			}
+		}
+	}
+	return
+}
+
 // IsMeltdownTransaction 检测是否为熔化交易
 // 熔化条件:
 // 1. 输入有 ≥3 个  PIN-UTXO

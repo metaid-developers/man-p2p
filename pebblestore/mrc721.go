@@ -17,16 +17,18 @@ import (
 //	ci:{collectionName}{seq}{itemPinId}           → 空(专辑内条目,按收录序正序)
 //	oi:{ownerAddress}&{collectionName}&{itemPinId} → 空(按持有人查询)
 //	th:{itemPinId}&{height}{txid}                 → Mrc721ItemTransfer JSON(转移路径)
+//	pt:{itemPinId}                                → Mrc721PendingTransfer JSON(未确认花费)
 //	p:{collectionName}&{pinId}                    → Mrc721PendingEntry JSON(乱序暂存)
 
 const (
-	mrc721CollectionKeyPrefix  = "c:"
-	mrc721CollByPinIdKeyPrefix = "cp:"
-	mrc721ItemKeyPrefix        = "i:"
-	mrc721CollItemKeyPrefix    = "ci:"
-	mrc721OwnerItemKeyPrefix   = "oi:"
-	mrc721ItemTransferPrefix   = "th:"
-	mrc721PendingKeyPrefix     = "p:"
+	mrc721CollectionKeyPrefix   = "c:"
+	mrc721CollByPinIdKeyPrefix  = "cp:"
+	mrc721ItemKeyPrefix         = "i:"
+	mrc721CollItemKeyPrefix     = "ci:"
+	mrc721OwnerItemKeyPrefix    = "oi:"
+	mrc721ItemTransferPrefix    = "th:"
+	mrc721PendingTransferPrefix = "pt:"
+	mrc721PendingKeyPrefix      = "p:"
 )
 
 type Mrc721Collection struct {
@@ -378,4 +380,48 @@ func (db *Database) PopMrc721Pending(collectionName string) ([]*Mrc721PendingEnt
 		}
 	}
 	return entries, nil
+}
+
+// ---------- pending transfer(mempool 未确认花费,advisory) ----------
+
+// Mrc721PendingTransfer 一条 NFT outpoint 的未确认花费(mempool 扫描产物)。
+// 仅是确认前读侧的可见性通道:确认后由 mrc721TransferHook 改写归属并落转移
+// 历史,本记录随即删除;交易被丢弃/替换时由 mempool 对账清除。txId 为账本
+// 口径(与确认后转移历史的 txId 同源),latest-wins(RBF 替换时整条覆盖)。
+type Mrc721PendingTransfer struct {
+	ItemPinId     string `json:"itemPinId"`
+	ChainName     string `json:"chainName"`
+	SpentOutpoint string `json:"spentOutpoint"` // 被花费的当前 outpoint(确认前 == item.Output)
+	FromAddress   string `json:"fromAddress"`   // 花费时持有人(== item.OwnerAddress)
+	ToAddress     string `json:"toAddress"`     // 花费交易推导的接收地址(推导失败留空)
+	TxId          string `json:"txId"`          // 花费交易 txid
+	FirstSeenAt   int64  `json:"firstSeenAt"`   // 首次观测到的 epoch 秒
+}
+
+func (db *Database) SaveMrc721PendingTransfer(pt *Mrc721PendingTransfer) error {
+	return mrc721PutJSON(db.Mrc721Db, mrc721PendingTransferPrefix+pt.ItemPinId, pt)
+}
+
+func (db *Database) GetMrc721PendingTransfer(itemPinId string) (*Mrc721PendingTransfer, error) {
+	var pt Mrc721PendingTransfer
+	found, err := mrc721GetJSON(db.Mrc721Db, mrc721PendingTransferPrefix+itemPinId, &pt)
+	if err != nil || !found {
+		return nil, err
+	}
+	return &pt, nil
+}
+
+func (db *Database) DeleteMrc721PendingTransfer(itemPinId string) error {
+	return db.Mrc721Db.Delete([]byte(mrc721PendingTransferPrefix+itemPinId), pebble.Sync)
+}
+
+// IterateMrc721PendingTransfers 遍历全部未确认花费记录(对账用,量级=同时在途转移数)。
+func (db *Database) IterateMrc721PendingTransfers(fn func(pt *Mrc721PendingTransfer) bool) error {
+	return mrc721IteratePrefix(db.Mrc721Db, mrc721PendingTransferPrefix, func(_ string, value []byte) bool {
+		var pt Mrc721PendingTransfer
+		if err := sonic.Unmarshal(value, &pt); err == nil {
+			return fn(&pt)
+		}
+		return true
+	})
 }
