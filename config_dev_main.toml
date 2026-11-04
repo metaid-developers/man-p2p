@@ -48,12 +48,12 @@ popCutNum = 21
 initialHeight = 6049343
 mrc20Height = 6049343
 # For Dogecoin Mainnet, use:
-rpcHost = "8.217.234.33:23116"
+rpcHost = "8.217.251.101:23116"
 rpcUser = "dxllzyll"
 rpcPass = "kjgoep61xjg1i5u3"
 rpcHttpPostMode = true
 rpcDisableTLS = true
-zmqHost = "tcp://8.217.234.33:15533"
+zmqHost = "tcp://8.217.251.101:15533"
 popCutNum = 21
 
 [pebble]
