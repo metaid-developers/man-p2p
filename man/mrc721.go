@@ -477,6 +477,13 @@ func (pd *PebbleData) mrc721TransferHook(chainName string, height int64, transfe
 			Time:        transferTime,
 		}); err != nil {
 			log.Printf("[MRC721] save item transfer %s: %v", pinId, err)
+		} else if pt, _ := pd.Database.GetMrc721PendingTransfer(pinId); pt != nil && pt.SpentOutpoint == output {
+			// 未确认通道清算:该 outpoint 的 pending 花费已定局——同笔确认(已入
+			// 转移历史)或冲突笔已被淘汰;pending 并入历史的幂等改写由上面的转移
+			// 记录完成,mempool 对账作为兜底
+			if err := pd.Database.DeleteMrc721PendingTransfer(pinId); err != nil {
+				log.Printf("[MRC721] delete pending transfer %s: %v", pinId, err)
+			}
 		}
 	}
 }

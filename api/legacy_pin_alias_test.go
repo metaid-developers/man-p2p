@@ -52,6 +52,10 @@ func (c *alphaLegacyAliasTestChain) GetTxSizeAndFees(txHash string) (int64, int6
 	return 0, 0, "", errors.New("not implemented")
 }
 
+func (c *alphaLegacyAliasTestChain) GetTransactionStatus(txId string) (bool, int64, string, int64, error) {
+	return false, 0, "", 0, errors.New("not implemented")
+}
+
 func TestAlphaContentReturnsCanonicalContentForLegacyMVCVariantPinID(t *testing.T) {
 	r := setupAlphaContractRouter(t)
 

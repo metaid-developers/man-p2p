@@ -375,6 +375,10 @@ func (m *MockIndexerAdapter) CatchTransfer(idMap map[string]string) map[string]*
 	return nil
 }
 
+func (m *MockIndexerAdapter) MempoolSpends(txList []interface{}, idMap map[string]string) map[string]*pin.PinTransferInfo {
+	return nil
+}
+
 func (m *MockIndexerAdapter) GetAddress(pkScript []byte) string {
 	return ""
 }

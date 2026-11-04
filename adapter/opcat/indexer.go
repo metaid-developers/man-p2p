@@ -167,6 +167,32 @@ func (indexer *Indexer) CatchTransfer(idMap map[string]string) (trasferMap map[s
 	return
 }
 
+// MempoolSpends mempool 转移检测:CatchTransfer 的 mempool 对应物,遍历给定交易
+// 而非 indexer.Block。
+func (indexer *Indexer) MempoolSpends(txList []interface{}, idMap map[string]string) (trasferMap map[string]*pin.PinTransferInfo) {
+	trasferMap = make(map[string]*pin.PinTransferInfo)
+	if len(idMap) == 0 {
+		return
+	}
+	for _, item := range txList {
+		tx, ok := item.(*wire.MsgTx)
+		if !ok {
+			continue
+		}
+		for _, in := range tx.TxIn {
+			id := fmt.Sprintf("%s:%d", in.PreviousOutPoint.Hash.String(), in.PreviousOutPoint.Index)
+			if fromAddress, ok := idMap[id]; ok {
+				info, err := indexer.GetOWnerAddress(id, tx)
+				if err == nil && info != nil {
+					info.FromAddress = fromAddress
+					trasferMap[id] = info
+				}
+			}
+		}
+	}
+	return
+}
+
 func (indexer *Indexer) GetOWnerAddress(inputId string, tx *wire.MsgTx) (info *pin.PinTransferInfo, err error) {
 	info = &pin.PinTransferInfo{}
 	firstInputId := fmt.Sprintf("%s:%d", tx.TxIn[0].PreviousOutPoint.Hash, tx.TxIn[0].PreviousOutPoint.Index)

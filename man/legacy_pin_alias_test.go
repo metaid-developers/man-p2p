@@ -52,6 +52,10 @@ func (c *legacyAliasTestChain) GetTxSizeAndFees(txHash string) (int64, int64, st
 	return 0, 0, "", errors.New("not implemented")
 }
 
+func (c *legacyAliasTestChain) GetTransactionStatus(txId string) (bool, int64, string, int64, error) {
+	return false, 0, "", 0, errors.New("not implemented")
+}
+
 func TestBackfillLegacyPinAliasesResolvesLegacyMVCPinID(t *testing.T) {
 	origStore := PebbleStore
 	origAdapters := ChainAdapter

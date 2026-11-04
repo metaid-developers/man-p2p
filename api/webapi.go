@@ -340,6 +340,8 @@ func registerRuntimeFeatureRoutesForMode(r *gin.Engine, chainSourceEnabled bool)
 	if !chainSourceEnabled || common.Config == nil {
 		return
 	}
+	// 通用交易状态查询(未确认/已确认 + 确认数/区块):链级读径,不挂模块开关
+	r.GET("/api/tx/status", txStatus)
 	if man.Mrc20RuntimeEnabled() {
 		r.GET("/mrc20/info/:id", mrc20Info)
 		r.GET("/mrc20/holders/:id/:page", mrc20Holders)
@@ -516,6 +518,46 @@ func tx(ctx *gin.Context) {
 		"Chain":     ctx.Param("chain"),
 	}
 	ctx.HTML(200, "home/tx.html", msg)
+}
+
+// txStatus 通用交易状态查询(兜底读径,不挂 NFT):confirmed=false 即 mempool
+// 未确认(confirmations=0),读侧据此区分「发了还没确认」和「查无此交易」。
+// 定位失败与 RPC 异常都返回 found=false/txStatus=unknown,不回传底层错误原文。
+func txStatus(ctx *gin.Context) {
+	chainName := ctx.Query("chainName")
+	txid := strings.TrimSpace(ctx.Query("txid"))
+	if chainName == "" || txid == "" {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
+		return
+	}
+	chainAdapter, ok := man.ChainAdapter[chainName]
+	if !ok {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
+		return
+	}
+	confirmed, confirmations, blockHash, height, err := chainAdapter.GetTransactionStatus(txid)
+	if err != nil {
+		ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{
+			"chainName": chainName,
+			"txid":      txid,
+			"found":     false,
+			"txStatus":  "unknown",
+		}))
+		return
+	}
+	status := "unconfirmed"
+	if confirmed {
+		status = "confirmed"
+	}
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{
+		"chainName":     chainName,
+		"txid":          txid,
+		"found":         true,
+		"txStatus":      status,
+		"confirmations": confirmations,
+		"blockHash":     blockHash,
+		"height":        height,
+	}))
 }
 
 func node(ctx *gin.Context) {

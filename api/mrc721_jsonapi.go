@@ -373,7 +373,30 @@ func mrc721ItemInfo(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrNoDataFound)
 		return
 	}
-	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", mrc721ItemDTO(item)))
+	data := mrc721ItemDTO(item)
+	// 未确认转移通道:mempool 内已花的当前 outpoint(见 man/mrc721_mempool.go),
+	// 无 pending 时为 null——读侧据此区分「发了还没确认」和「没发/已确认完毕」
+	if pt, _ := db.GetMrc721PendingTransfer(pinId); pt != nil {
+		data["pending"] = mrc721PendingTransferDTO(pt)
+	}
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", data))
+}
+
+// mrc721PendingTransferDTO 未确认花费行:txStatus 固定 "unconfirmed",确认后由
+// 转移钩子清算,pending 消失即定局(历史可查)。
+func mrc721PendingTransferDTO(pt *pebblestore.Mrc721PendingTransfer) gin.H {
+	return gin.H{
+		"itemPinId":     pt.ItemPinId,
+		"chainName":     pt.ChainName,
+		"spentOutpoint": pt.SpentOutpoint,
+		"fromAddress":   pt.FromAddress,
+		"toAddress":     pt.ToAddress,
+		"to":            pt.ToAddress,
+		"txId":          pt.TxId,
+		"txid":          pt.TxId,
+		"firstSeenAt":   pt.FirstSeenAt,
+		"txStatus":      "unconfirmed",
+	}
 }
 
 func mrc721ItemTransfers(ctx *gin.Context) {
@@ -409,7 +432,13 @@ func mrc721ItemTransfers(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrServiceError)
 		return
 	}
-	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": list, "total": total}))
+	// list 只含已确认历史;未确认花费单列 pending(不并入 total),确认后消失并
+	// 出现在 list 中——避免「no transfers」假阴性
+	pendingList := make([]gin.H, 0)
+	if pt, _ := db.GetMrc721PendingTransfer(pinId); pt != nil {
+		pendingList = append(pendingList, mrc721PendingTransferDTO(pt))
+	}
+	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": list, "total": total, "pending": pendingList}))
 }
 
 func mrc721ItemVerify(ctx *gin.Context) {

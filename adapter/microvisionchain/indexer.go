@@ -1,6 +1,7 @@
 package microvisionchain
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -268,6 +269,51 @@ func (indexer *Indexer) CatchTransfer(idMap map[string]string) (trasferMap map[s
 		}
 	}
 	return
+}
+
+// MempoolSpends mempool 转移检测:CatchTransfer 的 mempool 对应物。交易以
+// *wire.MsgTx 为主(getrawtransaction);RPC 解析失败时链适配器退回自定义解码的
+// *RawTransaction,此处将其 raw hex 重新反序列化为 wire 后走同一条
+// GetOWnerAddress 路径,保证账本口径花费 txid(GetNewHash)不丢。
+func (indexer *Indexer) MempoolSpends(txList []interface{}, idMap map[string]string) (trasferMap map[string]*pin.PinTransferInfo) {
+	trasferMap = make(map[string]*pin.PinTransferInfo)
+	if len(idMap) == 0 {
+		return
+	}
+	for _, item := range txList {
+		switch tx := item.(type) {
+		case *wire.MsgTx:
+			mempoolCollectMsgTxSpends(indexer, tx, idMap, trasferMap)
+		case *RawTransaction:
+			if tx == nil || tx.Hex == "" {
+				continue
+			}
+			raw, err := hex.DecodeString(tx.Hex)
+			if err != nil {
+				continue
+			}
+			var msgTx wire.MsgTx
+			if err := msgTx.Deserialize(bytes.NewReader(raw)); err != nil {
+				continue
+			}
+			mempoolCollectMsgTxSpends(indexer, &msgTx, idMap, trasferMap)
+		}
+	}
+	return
+}
+
+// mempoolCollectMsgTxSpends 单笔交易的 vin→idMap 匹配 + 转移要素推导(块路径同构)。
+func mempoolCollectMsgTxSpends(indexer *Indexer, tx *wire.MsgTx, idMap map[string]string, trasferMap map[string]*pin.PinTransferInfo) {
+	for _, in := range tx.TxIn {
+		id := fmt.Sprintf("%s:%d", in.PreviousOutPoint.Hash.String(), in.PreviousOutPoint.Index)
+		if fromAddress, ok := idMap[id]; ok {
+			info, err := indexer.GetOWnerAddress(id, tx)
+			if err == nil && info != nil {
+				info.FromAddress = fromAddress
+				trasferMap[id] = info
+			}
+		}
+	}
 }
 
 // IsMeltdownTransaction 检测是否为熔化交易
