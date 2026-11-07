@@ -185,22 +185,13 @@ func syncExistingMempool(chain string, chainAdapter adapter.Chain, indexer adapt
 		return err
 	}
 	if len(txList) == 0 {
-		// mempool 为空也可能有残留 pending(交易已确认/丢弃):仍走一次对账清算
-		if PebbleStore != nil && PebbleStore.Database != nil {
-			PebbleStore.mrc721MempoolSpendScan(chain, indexer, txList, nil)
-		}
 		return nil
 	}
-	pinList, txIns := indexer.CatchMempoolPins(txList)
+	pinList, _ := indexer.CatchMempoolPins(txList)
 	for _, pinNode := range pinList {
 		handler(pinNode)
 	}
 	log.Printf("[Mempool] startup sync for %s: %d txs, %d pins", chain, len(txList), len(pinList))
-	// MRC-721 未确认转移可见性:mempool 中已跟踪 item outpoint 的花费 → pending
-	// 记录(确认前读侧可辨「发了还没确认」;确认后钩子清算并落转移历史)
-	if PebbleStore != nil && PebbleStore.Database != nil {
-		PebbleStore.mrc721MempoolSpendScan(chain, indexer, txList, txIns)
-	}
 	return nil
 }
 

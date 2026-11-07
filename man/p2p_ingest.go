@@ -42,9 +42,5 @@ func IngestP2PPin(pinNode *pin.PinInscription) error {
 	pins := []*pin.PinInscription{&pinCopy}
 	handlePathAndOperation(&pins)
 	handleMetaIdInfo(&pins)
-	// MRC-721 聚合:与区块 ingest 同一钩子,仅确认 pin(GenesisHeight>0);mintCommit 幂等,双路径重复投递安全
-	if height > 0 && Mrc721RuntimeEnabled() {
-		PebbleStore.handleMrc721(pinCopy.ChainName, height, pins)
-	}
 	return nil
 }
