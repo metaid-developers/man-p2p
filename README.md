@@ -2,6 +2,8 @@
 
 A high-performance blockchain inscription indexer for MetaID protocol, supporting Bitcoin, Dogecoin, and MicroVision Chain (MVC).
 
+> **Note (2026-11-07):** MRC-721 indexing has been removed from this indexer — canonical MRC-721 indexing now lives in `metaso-p2p` (issuer-only protocol revision). Downstream consumers should use metaso-p2p's `/api/mrc721` endpoints; `collectionid` is the album index key.
+
 ## Overview
 
 **man-indexer-v2** is a multi-chain blockchain indexer designed specifically for the MetaID protocol. It efficiently indexes and queries inscription data (PINs) across multiple blockchain networks, providing RESTful API access for developers and applications.

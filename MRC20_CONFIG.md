@@ -20,7 +20,7 @@ MRC20 is a Bitcoin-based token protocol similar to BRC20 but with enhanced featu
 Add `"mrc20"` to the `module` array in your config file:
 
 ```toml
-module = ["metaname", "mrc721", "mrc20", "metaso_notifcation"]
+module = ["metaname", "mrc20", "metaso_notifcation"]
 ```
 
 ### Set MRC20 Start Height
@@ -50,7 +50,7 @@ mrc20Height = 5050000  # MRC20 starts at block 5050000
 version = "0.2"
 net = "mainnet"
 protocolID = "6d6574616964"
-module = ["metaname", "mrc721", "mrc20", "metaso_notifcation"]
+module = ["metaname", "mrc20", "metaso_notifcation"]
 
 [btc]
 initialHeight = 800000

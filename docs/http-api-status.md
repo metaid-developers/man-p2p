@@ -130,7 +130,7 @@ All routes below are defined in `api/mrc20.go`, but current startup does not cal
 | `GET` | `/api/mrc20/debug/pending-in/:address` | path: `address` req string | `not mounted` | Handler implemented |
 | `GET` | `/api/mrc20/debug/utxo-status/:address/:tickId` | path: `address` req string, `tickId` req string | `not mounted` | Handler implemented |
 
-## Code Exists But Routes Are Not Mounted: HTML MRC20 And MRC721 Pages
+## Code Exists But Routes Are Not Mounted: HTML MRC20 Pages
 
 | Method | Path | Parameters | Status | Notes |
 |---|---|---|---|---|
@@ -139,8 +139,6 @@ All routes below are defined in `api/mrc20.go`, but current startup does not cal
 | `GET` | `/mrc20/holders/:id/:page` | path: `id` req string, `page` req int64 fallback `1`; query: `address` opt string | `not mounted` | Handler implemented |
 | `GET` | `/mrc20/history/:id/:page` | path: `id` req string, `page` req int64 fallback `1` | `not mounted` | Handler implemented |
 | `GET` | `/mrc20/address/:id/:address/:page` | path: `id` req string, `address` req string, `page` req int64 fallback `1` | `not mounted` | Handler implemented |
-| `GET` | `/mrc721/:page` | path: `page` req string | `not mounted` | Function exists but body is effectively TODO |
-| `GET` | `/mrc721/item/list/:name/:page` | path: `name` req string, `page` req string | `not mounted` | Function exists but body is effectively TODO |
 
 ## Specific Note: `/api/address/pin/list/:address`
 

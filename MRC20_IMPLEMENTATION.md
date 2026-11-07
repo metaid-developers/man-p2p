@@ -129,7 +129,7 @@ func (pd *PebbleData) handleMrc20(chainName string, height int64, pinList *[]*pi
 
 **配置文件示例** (config_regtest.toml):
 ```toml
-module = ["metaname", "mrc721", "mrc20", "metaso_notifcation"]
+module = ["metaname", "mrc20", "metaso_notifcation"]
 
 [btc]
 initialHeight = 800000

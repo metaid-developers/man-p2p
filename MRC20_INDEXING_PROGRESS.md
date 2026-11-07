@@ -283,7 +283,7 @@ fi
 
 ### 完整配置示例
 ```toml
-module = ["metaname", "mrc721", "mrc20", "metaso_notifcation"]
+module = ["metaname", "mrc20", "metaso_notifcation"]
 
 [btc]
 initialHeight = 800000

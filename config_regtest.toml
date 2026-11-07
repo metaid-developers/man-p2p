@@ -1,7 +1,7 @@
 version = "0.2"
 net = "mainnet"
 protocolID = "6d6574616964"
-module = ["metaname","mrc721","mrc20","metaso_notifcation"]
+module = ["metaname","mrc20","metaso_notifcation"]
 syncDB = "./sync_data.db"
 adminToken = "metaid"
 syncHost = ["*"]
