@@ -361,8 +361,27 @@ func ListSnapshots(snapshotDir string) ([]SnapshotMetadata, error) {
 	return snapshots, nil
 }
 
+// validSnapshotID 快照 ID 白名单（生成格式为 2006-01-02_15-04-05）。
+// 存储层防线：拒绝路径分隔符与 ..，防止 Join 后越出 snapshotDir（DeleteSnapshot 会 RemoveAll）。
+func validSnapshotID(snapshotID string) bool {
+	if snapshotID == "" || len(snapshotID) > 128 {
+		return false
+	}
+	for _, r := range snapshotID {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // DeleteSnapshot 删除快照
 func DeleteSnapshot(snapshotDir, snapshotID string) error {
+	if !validSnapshotID(snapshotID) {
+		return fmt.Errorf("invalid snapshot id: %q", snapshotID)
+	}
 	snapshotPath := filepath.Join(snapshotDir, snapshotID)
 
 	// 检查是否存在
@@ -375,6 +394,9 @@ func DeleteSnapshot(snapshotDir, snapshotID string) error {
 
 // GetSnapshotInfo 获取快照信息
 func GetSnapshotInfo(snapshotDir, snapshotID string) (*SnapshotMetadata, error) {
+	if !validSnapshotID(snapshotID) {
+		return nil, fmt.Errorf("invalid snapshot id: %q", snapshotID)
+	}
 	metadataPath := filepath.Join(snapshotDir, snapshotID, "metadata.json")
 	metadataFile, err := os.Open(metadataPath)
 	if err != nil {
@@ -438,6 +460,9 @@ func GetSnapshotDir(basePath string) string {
 
 // VerifySnapshot 验证快照完整性
 func VerifySnapshot(snapshotDir, snapshotID string) error {
+	if !validSnapshotID(snapshotID) {
+		return fmt.Errorf("invalid snapshot id: %q", snapshotID)
+	}
 	snapshotPath := filepath.Join(snapshotDir, snapshotID)
 
 	// 检查元数据

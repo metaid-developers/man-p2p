@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"man-p2p/common"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,6 +50,11 @@ func TestAlphaP2PStatusFields(t *testing.T) {
 }
 
 func TestAlphaConfigReloadUpdatesRuntimeFilterState(t *testing.T) {
+	// reload 现挂 AdminAuth（R0 安全修复）：本测试只关注运行时状态更新，补 token 放行
+	orig := common.Config
+	common.Config = &common.AllConfig{AdminToken: "test-admin-token"}
+	t.Cleanup(func() { common.Config = orig })
+
 	configFile, err := os.CreateTemp("", "p2p-status-reload-*.json")
 	if err != nil {
 		t.Fatalf("CreateTemp: %v", err)
@@ -73,7 +79,7 @@ func TestAlphaConfigReloadUpdatesRuntimeFilterState(t *testing.T) {
 	}
 
 	reloadResp := httptest.NewRecorder()
-	reloadReq, _ := http.NewRequest(http.MethodPost, "/api/config/reload", nil)
+	reloadReq, _ := http.NewRequest(http.MethodPost, "/api/config/reload?token=test-admin-token", nil)
 	r.ServeHTTP(reloadResp, reloadReq)
 	if reloadResp.Code != http.StatusOK {
 		t.Fatalf("expected reload 200, got %d", reloadResp.Code)

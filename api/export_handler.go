@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"man-p2p/api/respond"
 	"man-p2p/export"
@@ -17,6 +19,61 @@ import (
 func RegisterExportRoutes(r *gin.Engine) {
 	r.POST("/api/export/user-data", exportUserData)
 	r.GET("/api/export/user-data", exportUserDataGET)
+}
+
+// 导出为重活（两轮全库扫描 + zip 流），无鉴权公开，必须限流防滥用。
+
+const (
+	exportRateWindow    = time.Minute
+	exportMaxPerWindow  = 3
+	exportMaxConcurrent = 2
+)
+
+type exportWindowCounter struct {
+	windowStart time.Time
+	count       int
+}
+
+var (
+	exportRateMu sync.Mutex
+	exportRate   = map[string]*exportWindowCounter{}
+	exportSlots  = make(chan struct{}, exportMaxConcurrent)
+)
+
+// exportGate 每 IP 固定窗口限流 + 全局并发闸门。
+// 返回非 nil release 表示放行（调用方须在导出完成后调用 release 释放并发槽位）；
+// 返回 nil 表示已写入 429 响应，调用方应直接结束请求。
+func exportGate(ctx *gin.Context) (release func()) {
+	ip := ctx.ClientIP()
+	now := time.Now()
+	exportRateMu.Lock()
+	w := exportRate[ip]
+	if w == nil || now.Sub(w.windowStart) >= exportRateWindow {
+		w = &exportWindowCounter{windowStart: now}
+		exportRate[ip] = w
+		// 顺手清理过期窗口，避免 map 随来源数无限增长
+		if len(exportRate) > 1024 {
+			for k, v := range exportRate {
+				if now.Sub(v.windowStart) >= exportRateWindow {
+					delete(exportRate, k)
+				}
+			}
+		}
+	}
+	w.count++
+	allowed := w.count <= exportMaxPerWindow
+	exportRateMu.Unlock()
+	if !allowed {
+		ctx.JSON(http.StatusTooManyRequests, respond.ApiError(429, "export rate limit exceeded, retry later"))
+		return nil
+	}
+	select {
+	case exportSlots <- struct{}{}:
+		return func() { <-exportSlots }
+	default:
+		ctx.JSON(http.StatusTooManyRequests, respond.ApiError(429, "export concurrency limit reached, retry later"))
+		return nil
+	}
 }
 
 func exportUserDataGET(ctx *gin.Context) {
@@ -52,6 +109,11 @@ func exportUserData(ctx *gin.Context) {
 }
 
 func exportUserDataStream(ctx *gin.Context, req *export.ExportRequest) {
+	release := exportGate(ctx)
+	if release == nil {
+		return
+	}
+	defer release()
 
 	pr, pw := io.Pipe()
 	defer pr.Close()

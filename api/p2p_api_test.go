@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"man-p2p/common"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -53,11 +54,31 @@ func TestP2PPeersEndpoint(t *testing.T) {
 }
 
 func TestConfigReloadEndpoint(t *testing.T) {
+	orig := common.Config
+	common.Config = &common.AllConfig{AdminToken: "test-admin-token"}
+	t.Cleanup(func() { common.Config = orig })
+
 	r := setupP2PTestRouter()
+
+	// R0 安全修复：匿名与错误 token 必须被拒
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/config/reload", nil)
 	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous reload must be rejected with 401, got %d", w.Code)
+	}
 
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/config/reload?token=wrong", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token must be rejected with 401, got %d", w.Code)
+	}
+
+	// 正确 token（query 兼容形式）放行
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/api/config/reload?token=test-admin-token", nil)
+	r.ServeHTTP(w, req)
 	if w.Code != 200 {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}

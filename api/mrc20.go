@@ -30,8 +30,9 @@ func mrc20JsonApi(r *gin.Engine) {
 	mrc20Group.GET("/tx/history", getHistoryByTx)
 	mrc20Group.GET("/tick/AddressBalance", getAddressBalance)
 
-	// 管理接口
+	// 管理接口（统一走 AdminAuth：adminToken 为空时一律拒绝）
 	adminGroup := mrc20Group.Group("/admin")
+	adminGroup.Use(AdminAuth())
 	adminGroup.GET("/index-height/:chain", getIndexHeight)
 	adminGroup.GET("/index-height/:chain/set", setIndexHeight)
 	adminGroup.GET("/reindex-block/:chain/:height", reindexBlock)
@@ -395,7 +396,6 @@ func setIndexHeight(ctx *gin.Context) {
 
 	// 从查询参数获取数据
 	heightStr := ctx.Query("height")
-	token := ctx.Query("token")
 	reason := ctx.Query("reason")
 
 	// 验证 height 参数
@@ -407,16 +407,6 @@ func setIndexHeight(ctx *gin.Context) {
 	height, err := strconv.ParseInt(heightStr, 10, 64)
 	if err != nil {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
-		return
-	}
-
-	// 简单的 token 验证（可以根据需要加强）
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
 		return
 	}
 
@@ -580,7 +570,6 @@ func debugUtxoStatus(ctx *gin.Context) {
 func reindexBlock(ctx *gin.Context) {
 	chainName := strings.ToLower(ctx.Param("chain"))
 	heightStr := ctx.Param("height")
-	token := ctx.Query("token")
 
 	// 验证链名
 	if !isValidChain(chainName) {
@@ -588,15 +577,6 @@ func reindexBlock(ctx *gin.Context) {
 		return
 	}
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	height, err := strconv.ParseInt(heightStr, 10, 64)
 	if err != nil || height <= 0 {
@@ -635,7 +615,6 @@ func reindexBlockRange(ctx *gin.Context) {
 	chainName := strings.ToLower(ctx.Param("chain"))
 	startStr := ctx.Param("start")
 	endStr := ctx.Param("end")
-	token := ctx.Query("token")
 
 	// 验证链名
 	if !isValidChain(chainName) {
@@ -643,15 +622,6 @@ func reindexBlockRange(ctx *gin.Context) {
 		return
 	}
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	startHeight, err := strconv.ParseInt(startStr, 10, 64)
 	if err != nil || startHeight <= 0 {
@@ -717,7 +687,6 @@ func reindexBlockRange(ctx *gin.Context) {
 func reindexFromHeight(ctx *gin.Context) {
 	chainName := strings.ToLower(ctx.Param("chain"))
 	heightStr := ctx.Param("height")
-	token := ctx.Query("token")
 
 	// 验证链名
 	if !isValidChain(chainName) {
@@ -725,15 +694,6 @@ func reindexFromHeight(ctx *gin.Context) {
 		return
 	}
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	height, err := strconv.ParseInt(heightStr, 10, 64)
 	if err != nil || height <= 0 {
@@ -781,7 +741,6 @@ func recalculateBalance(ctx *gin.Context) {
 	chainName := strings.ToLower(ctx.Param("chain"))
 	address := ctx.Param("address")
 	tickId := ctx.Param("tickId")
-	token := ctx.Query("token")
 
 	// 验证链名
 	if !isValidChain(chainName) {
@@ -789,15 +748,6 @@ func recalculateBalance(ctx *gin.Context) {
 		return
 	}
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	if address == "" || tickId == "" {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
@@ -852,18 +802,11 @@ func verifyBalance(ctx *gin.Context) {
 	chainName := strings.ToLower(ctx.Param("chain"))
 	address := ctx.Param("address")
 	tickId := ctx.Param("tickId")
-	token := ctx.Query("token")
 
 	// 验证链名
 	if !isValidChain(chainName) {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
-	}
-
-	// 验证 token（验证操作不需要严格认证，可以放宽）
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		// 验证不需要严格认证，但记录日志
-		log.Printf("[ADMIN] VerifyBalance without token: chain=%s, address=%s, tickId=%s", chainName, address, tickId)
 	}
 
 	if address == "" || tickId == "" {
@@ -910,7 +853,6 @@ func verifyBalance(ctx *gin.Context) {
 // GET /api/mrc20/admin/fix-pending/:chain?token=xxx
 func fixPendingUtxos(ctx *gin.Context) {
 	chainName := strings.ToLower(ctx.Param("chain"))
-	token := ctx.Query("token")
 
 	// 验证链名
 	if !isValidChain(chainName) {
@@ -918,15 +860,6 @@ func fixPendingUtxos(ctx *gin.Context) {
 		return
 	}
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	log.Printf("[ADMIN] FixPendingUtxos request: chain=%s", chainName)
 
@@ -955,17 +888,7 @@ func fixPendingUtxos(ctx *gin.Context) {
 // POST /api/mrc20/admin/snapshot/create?token=xxx
 // Body: {"description": "snapshot description"}
 func createSnapshot(ctx *gin.Context) {
-	token := ctx.Query("token")
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	// 获取描述
 	var req struct {
@@ -1007,17 +930,7 @@ func createSnapshot(ctx *gin.Context) {
 // listSnapshots 列出所有快照
 // GET /api/mrc20/admin/snapshot/list?token=xxx
 func listSnapshots(ctx *gin.Context) {
-	token := ctx.Query("token")
 
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
-		return
-	}
 
 	snapshotDir := man.GetSnapshotDir(common.Config.Pebble.Dir)
 	snapshots, err := man.ListSnapshots(snapshotDir)
@@ -1041,15 +954,8 @@ func listSnapshots(ctx *gin.Context) {
 // GET /api/mrc20/admin/snapshot/info/:id?token=xxx
 func getSnapshotInfo(ctx *gin.Context) {
 	snapshotID := ctx.Param("id")
-	token := ctx.Query("token")
-
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
+	if !ValidSnapshotID(snapshotID) {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
 
@@ -1090,15 +996,8 @@ func getSnapshotInfo(ctx *gin.Context) {
 // 警告：此操作会清空现有 MRC20 数据！
 func restoreSnapshot(ctx *gin.Context) {
 	snapshotID := ctx.Param("id")
-	token := ctx.Query("token")
-
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
+	if !ValidSnapshotID(snapshotID) {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
 
@@ -1141,15 +1040,8 @@ func restoreSnapshot(ctx *gin.Context) {
 // DELETE /api/mrc20/admin/snapshot/:id?token=xxx
 func deleteSnapshot(ctx *gin.Context) {
 	snapshotID := ctx.Param("id")
-	token := ctx.Query("token")
-
-	// 验证 token
-	if common.Config.AdminToken != "" && token != common.Config.AdminToken {
-		ctx.JSON(http.StatusUnauthorized, &respond.ApiResponse{
-			Code: 401,
-			Msg:  "Unauthorized: invalid admin token",
-			Data: nil,
-		})
+	if !ValidSnapshotID(snapshotID) {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
 

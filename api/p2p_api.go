@@ -9,7 +9,8 @@ import (
 )
 
 func RegisterP2PRoutes(r *gin.Engine) {
-	r.POST("/api/config/reload", configReload)
+	// 热载节点行为配置属管理面：强制 AdminToken（header 优先，兼容 ?token=）
+	r.POST("/api/config/reload", AdminAuth(), configReload)
 	r.GET("/api/p2p/status", p2pStatus)
 	r.GET("/api/p2p/peers", p2pPeers)
 	r.GET("/api/p2p/presence", p2pPresence)
