@@ -97,7 +97,7 @@ func handNotifcation(pinNode *pin.PinInscription) {
 }
 
 // notifCleanupInflight 记录清理中的地址；新通知到达时若已有清理在跑则跳过
-//（清理是保留策略，晚一轮到达无碍；下次通知会再次触发）。
+// （清理是保留策略，晚一轮到达无碍；下次通知会再次触发）。
 var notifCleanupInflight sync.Map
 
 func cleanUpNotifcationAsync(address string) {

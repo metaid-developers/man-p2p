@@ -94,6 +94,10 @@ func main() {
 		go pebblestore.StatPinSort(man.PebbleStore.Database)
 	}
 
+	// mempool 过期清理常驻（TTL 72h）：p2p-only 节点没有确认清理路径，
+	// 不治理会无限膨胀（生产节点 2 实测堆积 19GB）
+	go man.MempoolExpirySweepRun(ctx)
+
 	for {
 		if chainSourceEnabled {
 			man.IndexerRun(common.TestNet)

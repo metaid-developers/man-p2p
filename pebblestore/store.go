@@ -31,20 +31,21 @@ var noopLogger = &customLogger{}
 // AddressDB: 按地址存储的PIN数据，key是address转换后的metaid_path_blockTime_chainName_height_pinId,value是空
 // PinsMempoolDb：内存池数据，key是 pinid,value是空
 type Database struct {
-	PinsDBs       []*pebble.DB
-	PinSort       *pebble.DB
-	BlocksDB      *pebble.DB
-	CountDB       *pebble.DB
-	PinAliasDb    *pebble.DB
-	PathPinDB     *pebble.DB
-	AddressDB     *pebble.DB
-	CreatorDb     *pebble.DB
-	MrcDb         *pebble.DB
-	PinsMempoolDb *pebble.DB // 用于存储mempool中的pins数据
-	NotifcationDb *pebble.DB // 用于存储通知数据
-	MetaidInfoDB  *pebble.DB // 用于存储metaid信息
-	MetaDb        *pebble.DB // 用于存储meta数据
-	TransferDb    *pebble.DB // 用于存储转移数据
+	PinsDBs         []*pebble.DB
+	PinSort         *pebble.DB
+	BlocksDB        *pebble.DB
+	CountDB         *pebble.DB
+	PinAliasDb      *pebble.DB
+	PathPinDB       *pebble.DB
+	AddressDB       *pebble.DB
+	CreatorDb       *pebble.DB
+	MrcDb           *pebble.DB
+	PinsMempoolDb   *pebble.DB // 用于存储mempool中的pins数据
+	MempoolExpiryDb *pebble.DB // mempool 过期索引（mpexp_ 反向时间戳，R1 生命周期治理）
+	NotifcationDb   *pebble.DB // 用于存储通知数据
+	MetaidInfoDB    *pebble.DB // 用于存储metaid信息
+	MetaDb          *pebble.DB // 用于存储meta数据
+	TransferDb      *pebble.DB // 用于存储转移数据
 }
 type customLogger struct{}
 
@@ -128,6 +129,12 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 		log.Println(err)
 		return nil, err
 	}
+	os.MkdirAll(fmt.Sprintf("%s/mempool_expiry", basePath), 0755)
+	mempoolExpiryDb, err := pebble.Open(fmt.Sprintf("%s/mempool_expiry/db", basePath), dbOptions)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
 	os.MkdirAll(fmt.Sprintf("%s/notifcation", basePath), 0755)
 	notifcationDb, err := pebble.Open(fmt.Sprintf("%s/notifcation/db", basePath), dbOptions)
 	if err != nil {
@@ -160,7 +167,7 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 	}
 	return &Database{PinsDBs: pinsDBs, PinSort: pinSortDb, BlocksDB: blocksDB,
 		CountDB: countDB, PinAliasDb: pinAliasDb, PathPinDB: pathPinDB, AddressDB: addressDB,
-		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb}, nil
+		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, MempoolExpiryDb: mempoolExpiryDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb}, nil
 }
 
 // Close 关闭所有数据库
@@ -430,7 +437,7 @@ type PageResult struct {
 // locatePinSortCursorKey 把 lastId（pinId）还原为它在 PinSort 中的完整复合 key。
 // PinSort key = {blockTime}&{chain}&{height}&{pathMetaId}&{metaId}&{pinId}，
 // 由 pin 记录可完整重建；仅当重建 key 精确存在于 PinSort 时才可信
-//（SeenTime/Timestamp 全 0 的 pin 写入时用了 blockTime 兜底，无法复现）。
+// （SeenTime/Timestamp 全 0 的 pin 写入时用了 blockTime 兜底，无法复现）。
 func (idx *Database) locatePinSortCursorKey(lastId string) ([]byte, bool) {
 	vals := idx.BatchGetPinListByKeys([]string{lastId}, false)
 	if len(vals) == 0 || len(vals[0]) == 0 {

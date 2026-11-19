@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/cockroachdb/pebble"
@@ -222,6 +223,35 @@ func (db *Database) CountAdd(key string, value int64) error {
 	return db.CountDB.Set([]byte(key), []byte(strconv.FormatInt(old+value, 10)), pebble.Sync)
 }
 
+// mempool 过期索引：独立存储于 MempoolExpiryDb，key 前缀 "mpexp_"。
+// key = mpexp_{%019d 反向 sortTime}_{pinId}，value 为空。
+// 反向时间戳使索引降序=最旧在前，过期清理从最旧端 O(过期数) 收敛。
+const MempoolExpiryPrefix = "mpexp_"
+
+func mempoolExpiryKey(sortTime int64, pinId string) string {
+	const maxInt64 int64 = 9223372036854775807
+	return fmt.Sprintf("%s%019d_%s", MempoolExpiryPrefix, maxInt64-sortTime, pinId)
+}
+
+// ParseMempoolExpiryKey 返回 (sortTime, pinId, ok)
+func ParseMempoolExpiryKey(key []byte) (int64, string, bool) {
+	s := string(key)
+	if !strings.HasPrefix(s, MempoolExpiryPrefix) {
+		return 0, "", false
+	}
+	rest := s[len(MempoolExpiryPrefix):]
+	parts := strings.SplitN(rest, "_", 2)
+	if len(parts) != 2 || len(parts[0]) != 19 {
+		return 0, "", false
+	}
+	const maxInt64 int64 = 9223372036854775807
+	rev, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return maxInt64 - rev, parts[1], true
+}
+
 func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
 	if pinNode == nil || pinNode.Id == "" {
 		return nil
@@ -230,7 +260,16 @@ func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
 	if err != nil {
 		return err
 	}
-	return db.PinsMempoolDb.Set([]byte(pinNode.Id), value, pebble.Sync)
+	if err := db.PinsMempoolDb.Set([]byte(pinNode.Id), value, pebble.Sync); err != nil {
+		return err
+	}
+	// 过期索引：sortTime 缺省用当前时间（SeenTime/Timestamp 全 0 的 pin 仍可过期）。
+	// 索引独立于 MempoolExpiryDb，避免混入列表读路径。
+	sortTime := pin.EffectiveSortTime(pinNode)
+	if sortTime <= 0 {
+		sortTime = time.Now().Unix()
+	}
+	return db.MempoolExpiryDb.Set([]byte(mempoolExpiryKey(sortTime, pinNode.Id)), nil, pebble.Sync)
 }
 
 const maxMempoolListSummaryBytes = 4096
@@ -321,6 +360,7 @@ func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int
 		return []*pin.PinInscription{}, nil
 	}
 
+	// 过期索引在独立 MempoolExpiryDb 中，本迭代无需边界排除
 	iter, err := db.PinsMempoolDb.NewIter(nil)
 	if err != nil {
 		return nil, err
@@ -336,17 +376,16 @@ func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int
 		default:
 		}
 
-		key := string(iter.Key())
-
-		data, err := db.GetPinByKey(key)
-		if err != nil {
+		// 直接使用 mempool 存量 JSON（SetMempool 写入完整 pin），
+		// 不再逐条跨库回查主 pins 分片——旧实现对 N 条 mempool 做
+		// N 次跨库 Get + unmarshal，且主库无此 pin 时整条跳过（R1 修复）
+		var pinNode pin.PinInscription
+		if err := sonic.Unmarshal(CloneBytes(iter.Value()), &pinNode); err != nil {
+			log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", string(iter.Key()), err)
 			continue
 		}
-		var pinNode pin.PinInscription
-		err = sonic.Unmarshal(data, &pinNode)
-		if err != nil {
-			log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", key, err)
-			continue
+		if pinNode.Id == "" {
+			pinNode.Id = string(iter.Key())
 		}
 		trimMempoolPinForList(&pinNode)
 
