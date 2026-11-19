@@ -452,10 +452,20 @@ func (db *Database) SetNotifcationV2(address string, notifcationId int64, fromPi
 	return db.NotifcationDb.Set([]byte(key), data, pebble.Sync)
 }
 
+// notifcationIterOpts 通知库 key 形如 {address}_{019d reversedId}_{pinId}，
+// 迭代必须以地址前缀为边界——此前 NewIter(nil) 从库头扫到目标前缀，
+// 开销随全库通知数线性增长（R1 修复：LowerBound 直接定位，UpperBound 封顶）。
+func notifcationIterOpts(address string) *pebble.IterOptions {
+	prefix := address + "_"
+	return &pebble.IterOptions{
+		LowerBound: []byte(prefix),
+		UpperBound: []byte(prefix + "\xff"),
+	}
+}
+
 // 分页查询通知列表
 func (db *Database) GetNotifcationListV2(address string, lastId int64, size int) ([]pin.NotifcationData, int64, error) {
-	prefix := address + "_"
-	it, err := db.NotifcationDb.NewIter(nil)
+	it, err := db.NotifcationDb.NewIter(notifcationIterOpts(address))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -465,12 +475,9 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 	seenPins := make(map[string]struct{})
 	var total int64
 
-	// 从前缀开始遍历（已经按时间倒序排列）
+	// 迭代器已按地址前缀定界（按时间倒序排列）
 	for it.First(); it.Valid(); it.Next() {
 		key := it.Key()
-		if !strings.HasPrefix(string(key), prefix) {
-			break
-		}
 
 		// 解析 key 获取 notifcationId
 		parts := strings.Split(string(key), "_")
@@ -509,9 +516,6 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 		// 继续统计剩余的
 		for it.Valid() {
 			key := it.Key()
-			if !strings.HasPrefix(string(key), prefix) {
-				break
-			}
 			parts := strings.Split(string(key), "_")
 			if len(parts) >= 3 {
 				fromPinId := parts[2]
@@ -531,8 +535,7 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 
 // 清理旧通知 - 保留最近的 N 条
 func (db *Database) CleanUpNotifcationV2(address string, keepCount int) error {
-	prefix := address + "_"
-	it, err := db.NotifcationDb.NewIter(nil)
+	it, err := db.NotifcationDb.NewIter(notifcationIterOpts(address))
 	if err != nil {
 		return err
 	}
@@ -545,9 +548,6 @@ func (db *Database) CleanUpNotifcationV2(address string, keepCount int) error {
 	// 遍历找出需要删除的key
 	for it.First(); it.Valid(); it.Next() {
 		key := it.Key()
-		if !strings.HasPrefix(string(key), prefix) {
-			break
-		}
 
 		parts := strings.Split(string(key), "_")
 		if len(parts) >= 3 {

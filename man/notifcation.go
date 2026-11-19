@@ -7,6 +7,7 @@ import (
 	"man-p2p/pin"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -88,9 +89,25 @@ func handNotifcation(pinNode *pin.PinInscription) {
 		}
 		// 使用新的V2方法存储
 		PebbleStore.Database.SetNotifcationV2(toPIN.Address, notifcationId, pinNode.Id, content)
-		// 异步清理旧通知（保留最近300条）
-		go PebbleStore.Database.CleanUpNotifcationV2(toPIN.Address, 300)
+		// 异步清理旧通知（保留最近300条）：按地址 single-flight，
+		// 同一地址至多一个清理 goroutine 在跑，避免每条通知 spawn 一个
+		// 全前缀扫描把 mempool 高峰期的 IO 打满（R1 修复）
+		cleanUpNotifcationAsync(toPIN.Address)
 	}
+}
+
+// notifCleanupInflight 记录清理中的地址；新通知到达时若已有清理在跑则跳过
+//（清理是保留策略，晚一轮到达无碍；下次通知会再次触发）。
+var notifCleanupInflight sync.Map
+
+func cleanUpNotifcationAsync(address string) {
+	if _, loaded := notifCleanupInflight.LoadOrStore(address, struct{}{}); loaded {
+		return
+	}
+	go func() {
+		defer notifCleanupInflight.Delete(address)
+		PebbleStore.Database.CleanUpNotifcationV2(address, 300)
+	}()
 }
 
 func getNotifcationToAddress(pinNode *pin.PinInscription) (toPIN []pin.PinInscription) {
