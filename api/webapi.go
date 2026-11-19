@@ -84,8 +84,10 @@ func Start(f embed.FS) {
 	gin.SetMode(gin.ReleaseMode)
 	gin.DefaultWriter = io.Discard
 	startLocalDebugServerFromEnv()
+	WarnIfAdminTokenEmpty()
 	r := gin.Default()
 	r.Use(SlowRequestLogger())
+	r.Use(BodySizeLimit())
 	funcMap := template.FuncMap{
 		"formatRootId":   formatRootId,
 		"popLevelCount":  popLevelCount,

@@ -83,9 +83,10 @@ func btcJsonApi(r *gin.Engine) {
 	btcGroup.GET("/notifcation/list", notifcationList)
 	btcGroup.GET("/block/file", blockFileGet)
 	btcGroup.GET("/block/file/partCount", blockPartCount)
-	btcGroup.GET("/block/file/create", blockFileCreate)
-	btcGroup.GET("/block/id/list", blockIdList)
-	btcGroup.GET("/block/id/create", setPinIdList)
+	// admin 端点：统一走 AdminAuth（adminToken 为空时一律拒绝）
+	btcGroup.GET("/block/file/create", AdminAuth(), blockFileCreate)
+	btcGroup.GET("/block/id/list", AdminAuth(), blockIdList)
+	btcGroup.GET("/block/id/create", AdminAuth(), setPinIdList)
 
 	btcGroup.GET("/pin/:numberOrId", getPinById)
 	btcGroup.GET("/pin/ver/:pinid/:ver", pinHistory)
@@ -550,11 +551,6 @@ func blockPartCount(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"partCount": count, "btcMin": btcMin, "btcMax": btcMax, "mvcMin": mvcMin, "mvcMax": mvcMax}))
 }
 func blockFileCreate(ctx *gin.Context) {
-	token := ctx.Query("token")
-	if token != common.Config.AdminToken || token == "" {
-		ctx.JSON(http.StatusOK, "error token")
-		return
-	}
 	chainName := ctx.Query("chain")
 	if chainName == "" {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
@@ -570,11 +566,6 @@ func blockFileCreate(ctx *gin.Context) {
 
 // SetPinIdList
 func setPinIdList(ctx *gin.Context) {
-	token := ctx.Query("token")
-	if token != common.Config.AdminToken || token == "" {
-		ctx.JSON(http.StatusOK, "error token")
-		return
-	}
 	chainName := ctx.Query("chain")
 	if chainName == "" {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
@@ -588,11 +579,6 @@ func setPinIdList(ctx *gin.Context) {
 	ctx.String(http.StatusOK, "block file pin id list create finish")
 }
 func blockIdList(ctx *gin.Context) {
-	token := ctx.Query("token")
-	if token != common.Config.AdminToken || token == "" {
-		ctx.JSON(http.StatusOK, "error token")
-		return
-	}
 	chainName := ctx.Query("chain")
 	if chainName == "" {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)

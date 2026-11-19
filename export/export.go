@@ -7,7 +7,9 @@ import (
 	"man-p2p/man"
 )
 
-const maxPins = 500000
+// maxPins 单次导出上限：导出走全库扫描 + 逐 pin 序列化，500000 会放大成
+// 分钟级重活；SOP 公网验收样例（address 全量）实测仅 133 个文件，5000 足够。
+const maxPins = 5000
 
 func ExportUserData(w io.Writer, req *ExportRequest) error {
 	if err := validateRequest(req); err != nil {
