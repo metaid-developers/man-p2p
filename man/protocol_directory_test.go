@@ -183,3 +183,40 @@ func TestProtocolDirectoryCache(t *testing.T) {
 			}(), err)
 	}
 }
+
+// TestProtocolDirectoryReturnsIndependentCopy 回归：ProtocolDirectory 必须返回
+// 缓存切片的副本。api 层会按请求排序参数对返回值原地排序，若直接交出缓存
+// 切片，不同排序参数的并发请求将构成 data race 并污染全局缓存顺序（R1 修复）。
+func TestProtocolDirectoryReturnsIndependentCopy(t *testing.T) {
+	ResetProtocolDirCacheForTest()
+	t.Cleanup(ResetProtocolDirCacheForTest)
+
+	store := setupProtocolDirStore(t)
+	ingestProtocolPin(t, "testcopy0000000000000000000000000000000000000000000000000000000i0", "/protocols/copyproto", 100, 1000, "addr", "gmid", 0, nil)
+
+	first, _, err := store.ProtocolDirectory(false)
+	if err != nil {
+		t.Fatalf("ProtocolDirectory: %v", err)
+	}
+	if len(first) == 0 {
+		t.Fatal("expected at least one entry after ingest")
+	}
+
+	// 模拟 api 层原地排序对返回值的改写
+	want := first[0].Path
+	first[0].Path = "mutated-by-caller"
+
+	second, _, err := store.ProtocolDirectory(false)
+	if err != nil {
+		t.Fatalf("ProtocolDirectory second: %v", err)
+	}
+	if len(second) == 0 {
+		t.Fatal("expected cached entries on second call")
+	}
+	if second[0].Path == "mutated-by-caller" {
+		t.Fatal("cache slice was polluted by caller mutation — ProtocolDirectory must return a copy")
+	}
+	if second[0].Path != want {
+		t.Fatalf("cache order changed: want %q got %q", want, second[0].Path)
+	}
+}
