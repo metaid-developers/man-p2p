@@ -5,6 +5,17 @@
 - 来源：三路代码审计（读路径 / p2p 包 / 安全面）+ 生产实测。所有问题均有代码位置证据；行号为 `5d655d9` 时点。
 - 排序原则：**SEC = 上线前必须修的安全项；PERF = 有实测或明确劣化曲线的性能项；ROB = 健壮性/资源；INFRA = 部署面护栏**。
 
+## 执行状态（随批次更新）
+
+- **R0 安全止血：已发布生产（2026-11-20，`79c7bb3`，双节点）。** SEC-1/2/4/10 + SEC-3 止血（export 限流+并发闸门+maxPins 5000，保留公开不破验收）全部落地；adminToken 已配置强随机值（节点本地 `.admin-token`）。SEC-5 依赖的 PERF-1/2/3 见 R1。
+- **R1 性能止血：代码完成（分支 `perf/optimize-r1`），待发布后复测基准。**
+  - PERF-5 protocolList race → `0d16987`
+  - PERF-4 notifcation 边界迭代 + single-flight 清理 → `f695838`
+  - PERF-3 pin/list lastId 游标 + size/深度钳制 → `8e99a2b`（契约变化：page>5000 返回参数错误，深翻页走 lastId）
+  - PERF-1 mempool TTL 生命周期（mpexp_ 独立索引库 + 常驻 sweep 72h/10min）+ 读路径直读去跨库回查 + 离线回补工具 → `4e3dd73`（**发布后须在节点 2 停机跑 `tools/mempool_expiry_backfill -delete-expired` 清理 19GB 存量**）
+  - 待办：发布后按 perf-baseline.md §7 复测；SEC-5 的 nginx 限流仍未部署（INFRA-1）
+- R2（MRC20 索引重建）、R3（p2p 健壮性）、R4（结构优化）：未开始。
+
 ---
 
 ## 一、SEC —— 安全（大规模推广前必须处理）

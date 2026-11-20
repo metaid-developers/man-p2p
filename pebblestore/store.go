@@ -31,20 +31,21 @@ var noopLogger = &customLogger{}
 // AddressDB: 按地址存储的PIN数据，key是address转换后的metaid_path_blockTime_chainName_height_pinId,value是空
 // PinsMempoolDb：内存池数据，key是 pinid,value是空
 type Database struct {
-	PinsDBs       []*pebble.DB
-	PinSort       *pebble.DB
-	BlocksDB      *pebble.DB
-	CountDB       *pebble.DB
-	PinAliasDb    *pebble.DB
-	PathPinDB     *pebble.DB
-	AddressDB     *pebble.DB
-	CreatorDb     *pebble.DB
-	MrcDb         *pebble.DB
-	PinsMempoolDb *pebble.DB // 用于存储mempool中的pins数据
-	NotifcationDb *pebble.DB // 用于存储通知数据
-	MetaidInfoDB  *pebble.DB // 用于存储metaid信息
-	MetaDb        *pebble.DB // 用于存储meta数据
-	TransferDb    *pebble.DB // 用于存储转移数据
+	PinsDBs         []*pebble.DB
+	PinSort         *pebble.DB
+	BlocksDB        *pebble.DB
+	CountDB         *pebble.DB
+	PinAliasDb      *pebble.DB
+	PathPinDB       *pebble.DB
+	AddressDB       *pebble.DB
+	CreatorDb       *pebble.DB
+	MrcDb           *pebble.DB
+	PinsMempoolDb   *pebble.DB // 用于存储mempool中的pins数据
+	MempoolExpiryDb *pebble.DB // mempool 过期索引（mpexp_ 反向时间戳，R1 生命周期治理）
+	NotifcationDb   *pebble.DB // 用于存储通知数据
+	MetaidInfoDB    *pebble.DB // 用于存储metaid信息
+	MetaDb          *pebble.DB // 用于存储meta数据
+	TransferDb      *pebble.DB // 用于存储转移数据
 }
 type customLogger struct{}
 
@@ -128,6 +129,12 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 		log.Println(err)
 		return nil, err
 	}
+	os.MkdirAll(fmt.Sprintf("%s/mempool_expiry", basePath), 0755)
+	mempoolExpiryDb, err := pebble.Open(fmt.Sprintf("%s/mempool_expiry/db", basePath), dbOptions)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
 	os.MkdirAll(fmt.Sprintf("%s/notifcation", basePath), 0755)
 	notifcationDb, err := pebble.Open(fmt.Sprintf("%s/notifcation/db", basePath), dbOptions)
 	if err != nil {
@@ -160,7 +167,7 @@ func NewDataBase(basePath string, shardNum int) (*Database, error) {
 	}
 	return &Database{PinsDBs: pinsDBs, PinSort: pinSortDb, BlocksDB: blocksDB,
 		CountDB: countDB, PinAliasDb: pinAliasDb, PathPinDB: pathPinDB, AddressDB: addressDB,
-		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb}, nil
+		CreatorDb: creatorDb, PinsMempoolDb: mempoolDb, MempoolExpiryDb: mempoolExpiryDb, NotifcationDb: notifcationDb, MetaDb: metaDb, MetaidInfoDB: metaIdInfoDb, TransferDb: transferDb, MrcDb: mrcDb}, nil
 }
 
 // Close 关闭所有数据库
@@ -427,13 +434,63 @@ type PageResult struct {
 	NextId string   // 下次分页用
 }
 
+// locatePinSortCursorKey 把 lastId（pinId）还原为它在 PinSort 中的完整复合 key。
+// PinSort key = {blockTime}&{chain}&{height}&{pathMetaId}&{metaId}&{pinId}，
+// 由 pin 记录可完整重建；仅当重建 key 精确存在于 PinSort 时才可信
+// （SeenTime/Timestamp 全 0 的 pin 写入时用了 blockTime 兜底，无法复现）。
+func (idx *Database) locatePinSortCursorKey(lastId string) ([]byte, bool) {
+	vals := idx.BatchGetPinListByKeys([]string{lastId}, false)
+	if len(vals) == 0 || len(vals[0]) == 0 {
+		return nil, false
+	}
+	var p pin.PinInscription
+	if err := sonic.Unmarshal(vals[0], &p); err != nil || p.Id == "" {
+		return nil, false
+	}
+	sortTime := pin.EffectiveSortTime(&p)
+	if sortTime <= 0 {
+		return nil, false
+	}
+	key := pin.GenPinSortKey(&p, sortTime, p.ChainName, p.GenesisHeight)
+	if _, closer, err := idx.PinSort.Get([]byte(key)); err != nil {
+		return nil, false
+	} else {
+		closer.Close()
+	}
+	return []byte(key), true
+}
+
 // QueryPageKeys 通用分页key查询，pages.db
 func (idx *Database) QueryPinPageList(db *pebble.DB, q PageQuery) (PageResult, error) {
 	it, _ := idx.PinSort.NewIter(nil)
 	defer it.Close()
 	var keys []string
-	skip := q.Page * q.Size
 	count := 0
+	// lastId 游标模式：从游标前一个 key 起倒序收集，O(size)，
+	// 替代旧的 page*size 次 Prev 回退扫描（深页线性变慢的根因，R1 修复）。
+	if q.LastId != "" {
+		if cursor, ok := idx.locatePinSortCursorKey(q.LastId); ok {
+			for it.SeekLT(cursor); it.Valid(); it.Prev() {
+				arr := strings.Split(string(it.Key()), "&")
+				key := "err"
+				if len(arr) >= 6 {
+					key = arr[5]
+				}
+				keys = append(keys, key)
+				count++
+				if count >= q.Size {
+					break
+				}
+			}
+			res := PageResult{List: keys, NextId: ""}
+			if len(keys) > 0 {
+				res.NextId = keys[len(keys)-1]
+			}
+			return res, nil
+		}
+		// 游标重建失败 → 落回 offset 扫描（保持旧语义）
+	}
+	skip := q.Page * q.Size
 	// 从最后一个 key 开始倒序遍历
 	for it.Last(); it.Valid(); it.Prev() {
 		if skip > 0 {

@@ -43,6 +43,9 @@ const (
 const (
 	defaultPinListPageSize int64 = 20
 	maxPinListPageSize     int64 = 200
+	// offset 分页深度上限：超过后要求改用响应里的 lastId 游标
+	//（游标 O(size) 定位；offset 模式每页从尾回退扫描，深页线性变慢）
+	maxPinListPageDepth int64 = 5000
 )
 
 func normalizePinListPageSize(size int64) int64 {
@@ -116,6 +119,8 @@ func metaidList(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}
+	// size 上限 200（超限截断），防无界分页放大
+	size = normalizePinListPageSize(size)
 	list, err := man.PebbleStore.Database.MetaIdPageList(page-1, size)
 	if err != nil {
 		ctx.JSON(http.StatusOK, respond.ApiSuccess(1, "ok", gin.H{"list": list, "count": 0}))
@@ -136,6 +141,12 @@ func pinList(ctx *gin.Context) {
 	//size, err := strconv.ParseInt(ctx.Query("size"), 10, 64)
 	size, err := strconv.Atoi(ctx.Query("size"))
 	if err != nil {
+		ctx.JSON(http.StatusOK, respond.ErrParameterError)
+		return
+	}
+	// size 上限 200、offset 深度限幅 5000 页：深翻页应改用响应中的 lastId 游标
+	size = int(normalizePinListPageSize(int64(size)))
+	if int64(page) > maxPinListPageDepth {
 		ctx.JSON(http.StatusOK, respond.ErrParameterError)
 		return
 	}

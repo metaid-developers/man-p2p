@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/cockroachdb/pebble"
@@ -222,6 +223,35 @@ func (db *Database) CountAdd(key string, value int64) error {
 	return db.CountDB.Set([]byte(key), []byte(strconv.FormatInt(old+value, 10)), pebble.Sync)
 }
 
+// mempool 过期索引：独立存储于 MempoolExpiryDb，key 前缀 "mpexp_"。
+// key = mpexp_{%019d 反向 sortTime}_{pinId}，value 为空。
+// 反向时间戳使索引降序=最旧在前，过期清理从最旧端 O(过期数) 收敛。
+const MempoolExpiryPrefix = "mpexp_"
+
+func mempoolExpiryKey(sortTime int64, pinId string) string {
+	const maxInt64 int64 = 9223372036854775807
+	return fmt.Sprintf("%s%019d_%s", MempoolExpiryPrefix, maxInt64-sortTime, pinId)
+}
+
+// ParseMempoolExpiryKey 返回 (sortTime, pinId, ok)
+func ParseMempoolExpiryKey(key []byte) (int64, string, bool) {
+	s := string(key)
+	if !strings.HasPrefix(s, MempoolExpiryPrefix) {
+		return 0, "", false
+	}
+	rest := s[len(MempoolExpiryPrefix):]
+	parts := strings.SplitN(rest, "_", 2)
+	if len(parts) != 2 || len(parts[0]) != 19 {
+		return 0, "", false
+	}
+	const maxInt64 int64 = 9223372036854775807
+	rev, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, "", false
+	}
+	return maxInt64 - rev, parts[1], true
+}
+
 func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
 	if pinNode == nil || pinNode.Id == "" {
 		return nil
@@ -230,7 +260,16 @@ func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
 	if err != nil {
 		return err
 	}
-	return db.PinsMempoolDb.Set([]byte(pinNode.Id), value, pebble.Sync)
+	if err := db.PinsMempoolDb.Set([]byte(pinNode.Id), value, pebble.Sync); err != nil {
+		return err
+	}
+	// 过期索引：sortTime 缺省用当前时间（SeenTime/Timestamp 全 0 的 pin 仍可过期）。
+	// 索引独立于 MempoolExpiryDb，避免混入列表读路径。
+	sortTime := pin.EffectiveSortTime(pinNode)
+	if sortTime <= 0 {
+		sortTime = time.Now().Unix()
+	}
+	return db.MempoolExpiryDb.Set([]byte(mempoolExpiryKey(sortTime, pinNode.Id)), nil, pebble.Sync)
 }
 
 const maxMempoolListSummaryBytes = 4096
@@ -321,6 +360,7 @@ func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int
 		return []*pin.PinInscription{}, nil
 	}
 
+	// 过期索引在独立 MempoolExpiryDb 中，本迭代无需边界排除
 	iter, err := db.PinsMempoolDb.NewIter(nil)
 	if err != nil {
 		return nil, err
@@ -336,17 +376,16 @@ func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int
 		default:
 		}
 
-		key := string(iter.Key())
-
-		data, err := db.GetPinByKey(key)
-		if err != nil {
+		// 直接使用 mempool 存量 JSON（SetMempool 写入完整 pin），
+		// 不再逐条跨库回查主 pins 分片——旧实现对 N 条 mempool 做
+		// N 次跨库 Get + unmarshal，且主库无此 pin 时整条跳过（R1 修复）
+		var pinNode pin.PinInscription
+		if err := sonic.Unmarshal(CloneBytes(iter.Value()), &pinNode); err != nil {
+			log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", string(iter.Key()), err)
 			continue
 		}
-		var pinNode pin.PinInscription
-		err = sonic.Unmarshal(data, &pinNode)
-		if err != nil {
-			log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", key, err)
-			continue
+		if pinNode.Id == "" {
+			pinNode.Id = string(iter.Key())
 		}
 		trimMempoolPinForList(&pinNode)
 
@@ -452,10 +491,20 @@ func (db *Database) SetNotifcationV2(address string, notifcationId int64, fromPi
 	return db.NotifcationDb.Set([]byte(key), data, pebble.Sync)
 }
 
+// notifcationIterOpts 通知库 key 形如 {address}_{019d reversedId}_{pinId}，
+// 迭代必须以地址前缀为边界——此前 NewIter(nil) 从库头扫到目标前缀，
+// 开销随全库通知数线性增长（R1 修复：LowerBound 直接定位，UpperBound 封顶）。
+func notifcationIterOpts(address string) *pebble.IterOptions {
+	prefix := address + "_"
+	return &pebble.IterOptions{
+		LowerBound: []byte(prefix),
+		UpperBound: []byte(prefix + "\xff"),
+	}
+}
+
 // 分页查询通知列表
 func (db *Database) GetNotifcationListV2(address string, lastId int64, size int) ([]pin.NotifcationData, int64, error) {
-	prefix := address + "_"
-	it, err := db.NotifcationDb.NewIter(nil)
+	it, err := db.NotifcationDb.NewIter(notifcationIterOpts(address))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -465,12 +514,9 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 	seenPins := make(map[string]struct{})
 	var total int64
 
-	// 从前缀开始遍历（已经按时间倒序排列）
+	// 迭代器已按地址前缀定界（按时间倒序排列）
 	for it.First(); it.Valid(); it.Next() {
 		key := it.Key()
-		if !strings.HasPrefix(string(key), prefix) {
-			break
-		}
 
 		// 解析 key 获取 notifcationId
 		parts := strings.Split(string(key), "_")
@@ -509,9 +555,6 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 		// 继续统计剩余的
 		for it.Valid() {
 			key := it.Key()
-			if !strings.HasPrefix(string(key), prefix) {
-				break
-			}
 			parts := strings.Split(string(key), "_")
 			if len(parts) >= 3 {
 				fromPinId := parts[2]
@@ -531,8 +574,7 @@ func (db *Database) GetNotifcationListV2(address string, lastId int64, size int)
 
 // 清理旧通知 - 保留最近的 N 条
 func (db *Database) CleanUpNotifcationV2(address string, keepCount int) error {
-	prefix := address + "_"
-	it, err := db.NotifcationDb.NewIter(nil)
+	it, err := db.NotifcationDb.NewIter(notifcationIterOpts(address))
 	if err != nil {
 		return err
 	}
@@ -545,9 +587,6 @@ func (db *Database) CleanUpNotifcationV2(address string, keepCount int) error {
 	// 遍历找出需要删除的key
 	for it.First(); it.Valid(); it.Next() {
 		key := it.Key()
-		if !strings.HasPrefix(string(key), prefix) {
-			break
-		}
 
 		parts := strings.Split(string(key), "_")
 		if len(parts) >= 3 {

@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -245,7 +246,10 @@ func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Ti
 		if force || time.Since(protocolDirCache.builtAt) >= protocolDirCacheTTL {
 			startProtocolDirRebuildLocked(pd)
 		}
-		return protocolDirCache.entries, protocolDirCache.builtAt, nil
+		// 返回副本：调用方（api/protocol_list.go）会按请求排序参数对返回值
+		// 原地排序，直接交出缓存切片会构成 data race 并污染缓存顺序。
+		// 目录条目量级为几十条，克隆开销可忽略。
+		return slices.Clone(protocolDirCache.entries), protocolDirCache.builtAt, nil
 	}
 	entries, err := protocolDirBuildFn(pd)
 	if err != nil {
@@ -255,7 +259,7 @@ func (pd *PebbleData) ProtocolDirectory(force bool) ([]ProtocolDirEntry, time.Ti
 	protocolDirCache.entries = entries
 	persistProtocolDirSnapshotLocked(entries, protocolDirCache.builtAt)
 	startProtocolDirProberLocked(pd)
-	return protocolDirCache.entries, protocolDirCache.builtAt, nil
+	return slices.Clone(protocolDirCache.entries), protocolDirCache.builtAt, nil
 }
 
 // startProtocolDirRebuildLocked 触发一次后台重建（重建中防重入）。
