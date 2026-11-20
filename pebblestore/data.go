@@ -381,7 +381,11 @@ func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int
 		// N 次跨库 Get + unmarshal，且主库无此 pin 时整条跳过（R1 修复）
 		var pinNode pin.PinInscription
 		if err := sonic.Unmarshal(CloneBytes(iter.Value()), &pinNode); err != nil {
-			log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", string(iter.Key()), err)
+			// 空 value（旧版写入形态，存量回填工具会删除）：静默跳过防日志洪流；
+			// 非空坏数据才记日志
+			if len(iter.Value()) > 0 {
+				log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", string(iter.Key()), err)
+			}
 			continue
 		}
 		if pinNode.Id == "" {

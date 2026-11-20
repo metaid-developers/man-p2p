@@ -1,5 +1,5 @@
 // mempool_expiry_backfill 为存量 mempool 条目回补 mpexp_ 过期索引
-//（独立库 mempool_expiry/db），并可立即删除超过 TTL 的条目。
+// （独立库 mempool_expiry/db），并可立即删除超过 TTL 的条目。
 //
 // 背景：mpexp_ 反向时间戳索引自 R1 起由 SetMempool 同步写入；此前的存量
 // 数据没有索引条目，在线 sweep 只能清理新写入，历史堆积（如生产节点 2
@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	expiryPrefix      = "mpexp_"
+	expiryPrefix       = "mpexp_"
 	maxInt64     int64 = 9223372036854775807
 )
 
@@ -64,21 +64,43 @@ func main() {
 	}
 	cutoff := time.Now().Add(-time.Duration(*ttlHours) * time.Hour).Unix()
 
-	// Phase 1: 回补索引（跳过已有索引条目，幂等可续跑）
+	// Phase 1: 回补索引（跳过已有索引条目，幂等可续跑）；
+	// 空 value 条目（旧版 SetMempool 只写 key 不写数据，存量主体）无数据
+	// 无读者，直接删除。
 	pinIt, err := pinDB.NewIter(nil)
 	if err != nil {
 		log.Fatalf("iterate: %v", err)
 	}
 	var (
 		scanned, indexed, skippedIndexed, noTime int
+		emptyDeleted, badData                    int
 		batch                                    = idxDB.NewBatch()
+		emptyBatch                               = pinDB.NewBatch()
 	)
 	for pinIt.First(); pinIt.Valid(); pinIt.Next() {
 		scanned++
 		id := string(pinIt.Key())
+		value := pinIt.Value()
 		var p pin.PinInscription
-		if err := sonic.Unmarshal(pinIt.Value(), &p); err != nil {
-			log.Printf("[WARN] skip unparseable entry %s: %v", id, err)
+		if err := sonic.Unmarshal(value, &p); err != nil {
+			if len(value) == 0 {
+				if err := emptyBatch.Delete(pinIt.Key(), nil); err != nil {
+					log.Fatalf("empty delete: %v", err)
+				}
+				emptyDeleted++
+				if emptyDeleted%100000 == 0 {
+					if err := emptyBatch.Commit(pebble.Sync); err != nil {
+						log.Fatalf("empty commit: %v", err)
+					}
+					emptyBatch.Reset()
+					log.Printf("progress: scanned=%d indexed=%d emptyDeleted=%d badData=%d", scanned, indexed, emptyDeleted, badData)
+				}
+				continue
+			}
+			badData++
+			if badData%100000 == 0 {
+				log.Printf("progress: scanned=%d indexed=%d emptyDeleted=%d badData=%d", scanned, indexed, emptyDeleted, badData)
+			}
 			continue
 		}
 		sortTime := pin.EffectiveSortTime(&p)
@@ -101,7 +123,7 @@ func main() {
 				log.Fatalf("commit: %v", err)
 			}
 			batch.Reset()
-			log.Printf("progress: scanned=%d indexed=%d skipped=%d noTime=%d", scanned, indexed, skippedIndexed, noTime)
+			log.Printf("progress: scanned=%d indexed=%d emptyDeleted=%d badData=%d", scanned, indexed, emptyDeleted, badData)
 		}
 	}
 	pinIt.Close()
@@ -109,7 +131,11 @@ func main() {
 		log.Fatalf("final commit: %v", err)
 	}
 	batch.Close()
-	log.Printf("phase1 done: scanned=%d indexed=%d alreadyIndexed=%d noTime=%d", scanned, indexed, skippedIndexed, noTime)
+	if err := emptyBatch.Commit(pebble.Sync); err != nil {
+		log.Fatalf("final empty commit: %v", err)
+	}
+	emptyBatch.Close()
+	log.Printf("phase1 done: scanned=%d indexed=%d alreadyIndexed=%d noTime=%d emptyDeleted=%d badData=%d", scanned, indexed, skippedIndexed, noTime, emptyDeleted, badData)
 
 	if !*deleteExpired {
 		idxDB.Close()
