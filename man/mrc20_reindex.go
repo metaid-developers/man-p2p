@@ -49,10 +49,14 @@ func (pd *PebbleData) MarkUtxoAsSpent(txPoint, address, tickId, chain string, sp
 	mainKey := []byte(fmt.Sprintf("mrc20_utxo_%s", txPoint))
 	batch.Set(mainKey, data, pebble.Sync)
 
-	// 更新 mrc20_in 索引（保留但更新状态）
+	// 更新 mrc20_in 索引（保留但更新状态；sender 副本同步刷新，避免陈旧 Status 残留）
 	if utxo.ToAddress != "" {
 		inKey := []byte(fmt.Sprintf("mrc20_in_%s_%s_%s", utxo.ToAddress, utxo.Mrc20Id, txPoint))
 		batch.Set(inKey, data, pebble.Sync)
+	}
+	if utxo.FromAddress != "" && utxo.FromAddress != utxo.ToAddress {
+		fromInKey := []byte(fmt.Sprintf("mrc20_in_%s_%s_%s", utxo.FromAddress, utxo.Mrc20Id, txPoint))
+		batch.Set(fromInKey, data, pebble.Sync)
 	}
 
 	// 删除 available_utxo 索引（spent 后不再可用）

@@ -26,9 +26,11 @@ var (
 // - UTXO 表只保留 status=0 (Available) 和 status=1/2 (Pending) 的记录
 // - status=-1 (Spent) 的 UTXO 应该通过 DeleteMrc20Utxo 删除，不应该通过此方法保存
 // 索引：
-// - mrc20_utxo_{txPoint}: UTXO 主记录
-// - mrc20_in_{ToAddress}_{mrc20Id}_{txPoint}: 地址收入索引
-// - available_utxo_{chain}_{address}_{tickId}_{txPoint}: 可用 UTXO 专用索引 (只存储 status=0)
+//   - mrc20_utxo_{txPoint}: UTXO 主记录
+//   - mrc20_in_{ToAddress}_{mrc20Id}_{txPoint}: 地址收入索引
+//   - available_utxo_{chain}_{address}_{tickId}_{txPoint}: 可用 UTXO 专用索引 (只存储 status=0)
+//   - mrc20_op_tx_{txId}_{txPoint}: 交易→UTXO 定向索引（R2：替代 CheckOperationtx 全库扫描回退；
+//     索引行不随花费删除，读取方回查主键缺失时跳过，与旧全扫对硬删行不可见语义一致）
 func (pd *PebbleData) SaveMrc20Pin(utxoList []mrc20.Mrc20Utxo) error {
 	batch := pd.Database.MrcDb.NewBatch()
 	defer batch.Close()
@@ -85,6 +87,11 @@ func (pd *PebbleData) SaveMrc20Pin(utxoList []mrc20.Mrc20Utxo) error {
 		err = batch.Set([]byte(key), data, pebble.Sync)
 		if err != nil {
 			log.Println("Set mrc20 utxo error:", err)
+		}
+
+		// 交易→UTXO 定向索引（R2）：TxPoint 的 txid + 消费它的 OperationTx 各写一条
+		for _, opTxKey := range mrc20OpTxIndexKeys(&utxo) {
+			batch.Set([]byte(opTxKey), []byte("1"), pebble.Sync)
 		}
 
 		// 收入索引：所有记录都写入 mrc20_in_{ToAddress}
@@ -438,10 +445,16 @@ func (pd *PebbleData) UpdateMrc20Utxo(utxoList []*mrc20.Mrc20Utxo, isMempool boo
 				log.Println("Delete mrc20 utxo error:", err)
 			}
 
-			// 删除 mrc20_in 索引
+			// 删除 mrc20_in 索引（To 副本 + From 副本）
 			err = batch.Delete([]byte(inKey), pebble.Sync)
 			if err != nil {
 				log.Println("Delete mrc20 income index error:", err)
+			}
+			if utxo.FromAddress != "" && utxo.FromAddress != utxo.ToAddress {
+				fromInKey := fmt.Sprintf("mrc20_in_%s_%s_%s", utxo.FromAddress, utxo.Mrc20Id, utxo.TxPoint)
+				if err := batch.Delete([]byte(fromInKey), pebble.Sync); err != nil {
+					log.Println("Delete mrc20 income from-index error:", err)
+				}
 			}
 
 			// 删除 available_utxo 索引
@@ -550,27 +563,94 @@ func (pd *PebbleData) GetMrc20Shovel(pinIds []string, mrc20Id string) (map[strin
 	return result, nil
 }
 
-// CheckOperationtx 检查交易是否已处理（区分mempool和block状态）
-func (pd *PebbleData) CheckOperationtx(txId string, isMempool bool) (*mrc20.Mrc20Utxo, error) {
-	// 方法1：尝试查找 mrc20_op_tx_ 索引（向后兼容）
-	key := fmt.Sprintf("mrc20_op_tx_%s", txId)
-	value, closer, err := pd.Database.MrcDb.Get([]byte(key))
-	if err == nil {
-		defer closer.Close()
+// mrc20OpTxIndexKeys 生成 UTXO 的交易→UTXO 定向索引 key 列表：
+// `mrc20_op_tx_{txid}_{txPoint}`（TxPoint 的 txid 部分）+ `mrc20_op_tx_{OperationTx}_{txPoint}`（消费交易）。
+func mrc20OpTxIndexKeys(utxo *mrc20.Mrc20Utxo) []string {
+	var keys []string
+	txid := utxo.TxPoint
+	if idx := strings.LastIndex(utxo.TxPoint, ":"); idx > 0 {
+		txid = utxo.TxPoint[:idx]
+	}
+	if txid != "" {
+		keys = append(keys, fmt.Sprintf("mrc20_op_tx_%s_%s", txid, utxo.TxPoint))
+	}
+	if utxo.OperationTx != "" {
+		keys = append(keys, fmt.Sprintf("mrc20_op_tx_%s_%s", utxo.OperationTx, utxo.TxPoint))
+	}
+	return keys
+}
+
+// lookupMrc20UtxosByTxId R2：经 mrc20_op_tx_{txId}_ 前缀定位候选 txPoint，
+// 逐个回查主键并应用 BlockHeight 过滤。isMempool=true 取 -1 行；否则取块相位行
+// （includeZeroBlock 决定是否含 BlockHeight==0，CheckOperationtxAll 旧口径含 0、
+// CheckOperationtx 旧口径仅 >0）。返回 (nil,false) 表示索引无候选（存量数据
+// 未建索引），调用方回退全扫。
+func (pd *PebbleData) lookupMrc20UtxosByTxId(txId string, isMempool bool, includeZeroBlock bool, firstOnly bool) ([]*mrc20.Mrc20Utxo, bool, error) {
+	prefix := fmt.Sprintf("mrc20_op_tx_%s_", txId)
+	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(prefix),
+		UpperBound: []byte(prefix + "~"),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	defer iter.Close()
+
+	var result []*mrc20.Mrc20Utxo
+	for iter.First(); iter.Valid(); iter.Next() {
+		txPoint := string(iter.Key())[len(prefix):]
+		mainKey := fmt.Sprintf("mrc20_utxo_%s", txPoint)
+		value, closer, err := pd.Database.MrcDb.Get([]byte(mainKey))
+		if err != nil {
+			continue // 主键已删（硬删/清理），与旧全扫对硬删行不可见语义一致
+		}
 		var utxo mrc20.Mrc20Utxo
-		err = sonic.Unmarshal(value, &utxo)
-		if err == nil {
-			// 检查BlockHeight匹配状态：mempool(-1) vs block(>0)
-			if isMempool && utxo.BlockHeight == -1 {
-				return &utxo, nil
-			} else if !isMempool && utxo.BlockHeight > 0 {
-				return &utxo, nil
+		unmarshalErr := sonic.Unmarshal(value, &utxo)
+		closer.Close()
+		if unmarshalErr != nil {
+			continue
+		}
+		isTxPointMatch := strings.HasPrefix(utxo.TxPoint, txId+":")
+		isOperationTxMatch := utxo.OperationTx == txId
+		if !isTxPointMatch && !isOperationTxMatch {
+			continue
+		}
+		if isMempool && utxo.BlockHeight != -1 {
+			continue
+		}
+		if !isMempool {
+			if utxo.BlockHeight < 0 {
+				continue
+			}
+			if !includeZeroBlock && utxo.BlockHeight == 0 {
+				continue
 			}
 		}
+		u := utxo
+		result = append(result, &u)
+		if firstOnly {
+			return result, true, nil
+		}
+	}
+	if len(result) == 0 {
+		return nil, false, nil
+	}
+	return result, true, nil
+}
+
+// CheckOperationtx 检查交易是否已处理（区分mempool和block状态）
+// R2：优先走 mrc20_op_tx_ 定向索引；存量数据无索引时回退旧全库扫描
+func (pd *PebbleData) CheckOperationtx(txId string, isMempool bool) (*mrc20.Mrc20Utxo, error) {
+	if utxos, found, err := pd.lookupMrc20UtxosByTxId(txId, isMempool, false, true); err != nil {
+		return nil, err
+	} else if found {
+		if len(utxos) > 0 {
+			return utxos[0], nil
+		}
+		return nil, nil
 	}
 
-	// 方法2：如果索引不存在，通过扫描 TxPoint 查找
-	// 扫描所有 mrc20_utxo_ 前缀的记录，查找匹配的 txId
+	// 回退：全库扫描（存量 UTXO 未建 op_tx 索引）
 	prefix := []byte("mrc20_utxo_")
 	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
 		LowerBound: prefix,
@@ -629,7 +709,14 @@ func (pd *PebbleData) CheckOperationtxByTxPoint(txPoint string, isMempool bool) 
 }
 
 // CheckOperationtxAll 通过交易 ID 查找该交易的所有 UTXO（区分mempool和block状态）
+// R2：优先走 mrc20_op_tx_ 定向索引；存量数据无索引时回退旧全库扫描
 func (pd *PebbleData) CheckOperationtxAll(txId string, isMempool bool) ([]*mrc20.Mrc20Utxo, error) {
+	if utxos, found, err := pd.lookupMrc20UtxosByTxId(txId, isMempool, true, false); err != nil {
+		return nil, err
+	} else if found {
+		return utxos, nil
+	}
+
 	var result []*mrc20.Mrc20Utxo
 
 	// 扫描所有 mrc20_utxo_ 前缀的记录，查找匹配的 txId
@@ -913,8 +1000,10 @@ func (pd *PebbleData) GetMrc20AddressHistoryWithDirection(mrc20Id, address strin
 	var allRecords []*Mrc20HistoryRecord
 	recordMap := make(map[string]bool) // 用于去重：key = txPoint + direction
 
-	// 扫描所有该 tick 的 UTXO
-	prefix := "mrc20_utxo_"
+	// R2：迭代 mrc20_in_{address}_{mrc20Id}_ 定向索引（旧实现全库扫描
+	// mrc20_utxo_ 后按 Mrc20Id/ToAddress 过滤；收入副本按构造即为该集合，
+	// 花费路径（MarkUtxoAsSpent）会同步刷新副本 Status=-1，out 记录语义不变）
+	prefix := fmt.Sprintf("mrc20_in_%s_%s_", address, mrc20Id)
 	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
 		LowerBound: []byte(prefix),
 		UpperBound: []byte(prefix + "~"),
@@ -931,8 +1020,8 @@ func (pd *PebbleData) GetMrc20AddressHistoryWithDirection(mrc20Id, address strin
 			continue
 		}
 
-		// 只处理匹配 tickId 的记录
-		if utxo.Mrc20Id != mrc20Id {
+		// 防御过滤：sender 副本/异常数据不参与（正常情况下前缀已保证）
+		if utxo.Mrc20Id != mrc20Id || utxo.ToAddress != address {
 			continue
 		}
 
@@ -940,11 +1029,6 @@ func (pd *PebbleData) GetMrc20AddressHistoryWithDirection(mrc20Id, address strin
 		txid := utxo.TxPoint
 		if idx := strings.LastIndex(utxo.TxPoint, ":"); idx > 0 {
 			txid = utxo.TxPoint[:idx]
-		}
-
-		// 只处理属于该地址的 UTXO（ToAddress == 该地址）
-		if utxo.ToAddress != address {
-			continue
 		}
 
 		// 收入记录：收到这笔代币
@@ -1048,16 +1132,19 @@ type Mrc20Holder struct {
 	Balance decimal.Decimal `json:"balance"`
 }
 
-// GetMrc20Holders 获取 tick 的持有者列表（复用 API 余额接口）
+// GetMrc20Holders 获取 tick 的持有者列表（复用 API 余额口径）
+// R2：地址收集与余额计算都走 mrc20_in_ 定向索引——收集阶段迭代 mrc20_in_
+// 全前缀按 key 过滤 tick（sender 副本用 ToAddress==keyAddr 校验排除）；
+// 余额阶段按地址前缀 `mrc20_in_{addr}_{tickId}_` 累加，替代旧的
+// 「mrc20_utxo_ 全扫收集 + 每地址 GetAllChainsBalances（3链×全库扫描）」平方级实现
 func (pd *PebbleData) GetMrc20Holders(tickId string, start, limit int, searchAddress string) ([]Mrc20Holder, error) {
-	// 收集所有持有该 tickId 的地址
+	// 收集所有持有（含曾持有）该 tickId 的地址
 	addressSet := make(map[string]bool)
 
-	// 扫描 UTXO 收集地址
-	prefix := []byte("mrc20_utxo_")
+	const inPrefix = "mrc20_in_"
 	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
-		LowerBound: prefix,
-		UpperBound: append(prefix, 0xff),
+		LowerBound: []byte(inPrefix),
+		UpperBound: []byte(inPrefix + "~"),
 	})
 	if err != nil {
 		return nil, err
@@ -1065,42 +1152,35 @@ func (pd *PebbleData) GetMrc20Holders(tickId string, start, limit int, searchAdd
 	defer iter.Close()
 
 	for iter.First(); iter.Valid(); iter.Next() {
+		// key = mrc20_in_{addr}_{tickId}_{txPoint}；地址/tickId 均不含 '_'，可安全解析
+		parts := strings.SplitN(string(iter.Key())[len(inPrefix):], "_", 3)
+		if len(parts) != 3 || parts[1] != tickId {
+			continue
+		}
+		keyAddr := parts[0]
+
 		var utxo mrc20.Mrc20Utxo
 		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
 			continue
 		}
 
-		if utxo.Mrc20Id == tickId && utxo.ToAddress != "" {
-			if searchAddress == "" || strings.Contains(utxo.ToAddress, searchAddress) {
-				addressSet[utxo.ToAddress] = true
-			}
-		}
-	}
-
-	// 使用 API 余额接口计算每个地址的余额（自动处理跨链）
-	var holders []Mrc20Holder
-	for addr := range addressSet {
-		// 调用和 API 相同的方法：GetAllChainsBalances
-		allBalances, err := GetAllChainsBalances(addr)
-		if err != nil {
-			log.Printf("[Holders] Failed to get balances for addr=%s: %v", addr, err)
+		// 只统计收入副本（ToAddress==key 地址）；sender 副本（ToAddress 为对方）排除
+		if utxo.Mrc20Id != tickId || utxo.ToAddress == "" || utxo.ToAddress != keyAddr {
 			continue
 		}
-
-		// 累加该地址在所有链上该 tickId 的余额
-		totalBalance := decimal.Zero
-		for _, balances := range allBalances {
-			for _, b := range balances {
-				if b.TickId == tickId {
-					// 使用 Balance 字段（和 API 返回的一致）
-					totalBalance = totalBalance.Add(b.Balance)
-				}
-			}
+		if searchAddress != "" && !strings.Contains(utxo.ToAddress, searchAddress) {
+			continue
 		}
+		addressSet[utxo.ToAddress] = true
+	}
 
+	// 每地址余额：定向迭代 mrc20_in_{addr}_{tickId}_，累加口径与
+	// CalculateBalanceFromUTXO 的 Balance 字段一致（跨链求和）
+	var holders []Mrc20Holder
+	for addr := range addressSet {
 		holders = append(holders, Mrc20Holder{
 			Address: addr,
-			Balance: totalBalance,
+			Balance: pd.sumMrc20BalanceFromInIndex(addr, tickId),
 		})
 	}
 
@@ -1120,6 +1200,41 @@ func (pd *PebbleData) GetMrc20Holders(tickId string, start, limit int, searchAdd
 	}
 
 	return holders[start:end], nil
+}
+
+// sumMrc20BalanceFromInIndex 定向累加某地址某 tick 的可用余额（跨链），
+// 口径与 CalculateBalanceFromUTXO 的 Balance 字段一致：
+// Available 与 TeleportPending 计入，TransferPending 仅负 AmtChange（输入）计入。
+func (pd *PebbleData) sumMrc20BalanceFromInIndex(address, tickId string) decimal.Decimal {
+	prefix := fmt.Sprintf("mrc20_in_%s_%s_", address, tickId)
+	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
+		LowerBound: []byte(prefix),
+		UpperBound: []byte(prefix + "~"),
+	})
+	if err != nil {
+		return decimal.Zero
+	}
+	defer iter.Close()
+
+	total := decimal.Zero
+	for iter.First(); iter.Valid(); iter.Next() {
+		var utxo mrc20.Mrc20Utxo
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &utxo); err != nil {
+			continue
+		}
+		if utxo.ToAddress != address {
+			continue
+		}
+		switch utxo.Status {
+		case mrc20.UtxoStatusAvailable, mrc20.UtxoStatusTeleportPending:
+			total = total.Add(utxo.AmtChange)
+		case mrc20.UtxoStatusTransferPending:
+			if utxo.AmtChange.IsNegative() {
+				total = total.Add(utxo.AmtChange.Abs())
+			}
+		}
+	}
+	return total
 }
 
 // GetMrc20HoldersCount 获取持有者总数（包括曾经持有过的）
