@@ -8,11 +8,11 @@
 // 用法（必须先停 man-p2p 服务——同一 Pebble 目录只允许一个进程打开）：
 //
 //	mempool_expiry_backfill -data-dir /mnt2/man-p2p/man_base_data_pebble \
-//	  [-ttl-hours 72] [-delete-expired]
+//	  [-ttl-hours 72] [-delete-expired] [-compact]
 //
-// 磁盘回收：批量删除后 Pebble 自动 compaction 会渐进回收空间（19GB 级
-// 存量通常需数小时）；如需立即回收，可在工具跑完后用 pebble 自带工具或
-// 短暂重启服务触发 compaction。
+// -compact：对 mempool 与 mempool_expiry 两库做全键空间手动压实。批量删除
+// 后 LSM 中留有海量 tombstone，读迭代需逐个跳过（读路径依然慢）直至压实
+// 回收；-compact 在同一次停机窗口内直接完成回收。
 // 幂等：已有索引条目的 pin 跳过，可中断续跑。
 package main
 
@@ -45,6 +45,7 @@ func main() {
 	dataDir := flag.String("data-dir", "", "pebble data dir (contains mempool/db)")
 	ttlHours := flag.Int64("ttl-hours", 72, "mempool entry TTL in hours")
 	deleteExpired := flag.Bool("delete-expired", false, "delete entries older than TTL during backfill")
+	compact := flag.Bool("compact", false, "fully compact both mempool dbs after phases (reclaims tombstones)")
 	flag.Parse()
 
 	if *dataDir == "" {
@@ -52,9 +53,6 @@ func main() {
 	}
 	// 回补阶段始终写索引库，因此两库都以读写打开
 	pinDB, err := pebble.Open(filepath.Join(*dataDir, "mempool", "db"), &pebble.Options{})
-	if err != nil {
-		log.Fatalf("open mempool db: %v", err)
-	}
 	if err != nil {
 		log.Fatalf("open mempool db: %v", err)
 	}
@@ -195,6 +193,29 @@ func main() {
 
 	idxDB.Close()
 	pinDB.Close()
+
+	if *compact {
+		log.Printf("compacting mempool dbs (reclaiming tombstones)...")
+		compactStart := time.Now()
+		cdb, err := pebble.Open(filepath.Join(*dataDir, "mempool", "db"), &pebble.Options{})
+		if err != nil {
+			log.Fatalf("reopen mempool db: %v", err)
+		}
+		if err := cdb.Compact(nil, nil, true); err != nil {
+			log.Printf("[WARN] compact mempool: %v", err)
+		}
+		cdb.Close()
+		cdb, err = pebble.Open(filepath.Join(*dataDir, "mempool_expiry", "db"), &pebble.Options{})
+		if err != nil {
+			log.Fatalf("reopen mempool_expiry db: %v", err)
+		}
+		if err := cdb.Compact(nil, nil, true); err != nil {
+			log.Printf("[WARN] compact mempool_expiry: %v", err)
+		}
+		cdb.Close()
+		log.Printf("compact done in %s", time.Since(compactStart).Round(time.Second))
+	}
+
 	log.Println("mempool_expiry_backfill finished")
 	os.Exit(0)
 }
