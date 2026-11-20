@@ -135,61 +135,56 @@ func main() {
 	emptyBatch.Close()
 	log.Printf("phase1 done: scanned=%d indexed=%d alreadyIndexed=%d noTime=%d emptyDeleted=%d badData=%d", scanned, indexed, skippedIndexed, noTime, emptyDeleted, badData)
 
-	if !*deleteExpired {
-		idxDB.Close()
-		pinDB.Close()
-		log.Println("mempool_expiry_backfill finished (index backfill only)")
-		os.Exit(0)
-	}
-
-	// Phase 2: 从索引最旧端删除过期条目（数据 + 索引一起删）
-	idxIt, err := idxDB.NewIter(nil)
-	if err != nil {
-		log.Fatalf("iterate index: %v", err)
-	}
-	var deleted, kept int
-	delIdx := idxDB.NewBatch()
-	delPin := pinDB.NewBatch()
-	for idxIt.Last(); idxIt.Valid(); idxIt.Prev() { // 降序 = 最旧在前
-		parts := strings.SplitN(string(idxIt.Key())[len(expiryPrefix):], "_", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		rev, err := strconv.ParseInt(parts[0], 10, 64)
+	if *deleteExpired {
+		// Phase 2: 从索引最旧端删除过期条目（数据 + 索引一起删）
+		idxIt, err := idxDB.NewIter(nil)
 		if err != nil {
-			continue
+			log.Fatalf("iterate index: %v", err)
 		}
-		sortTime := maxInt64 - rev
-		if sortTime >= cutoff {
-			kept++
-			continue // 之后都是新数据
-		}
-		pinId := parts[1]
-		delPin.Delete([]byte(pinId), nil)
-		delIdx.Delete(idxIt.Key(), nil)
-		deleted++
-		if deleted%10000 == 0 {
-			if err := delPin.Commit(pebble.Sync); err != nil {
-				log.Fatalf("delete commit (pins): %v", err)
+		var deleted, kept int
+		delIdx := idxDB.NewBatch()
+		delPin := pinDB.NewBatch()
+		for idxIt.Last(); idxIt.Valid(); idxIt.Prev() { // 降序 = 最旧在前
+			parts := strings.SplitN(string(idxIt.Key())[len(expiryPrefix):], "_", 2)
+			if len(parts) != 2 {
+				continue
 			}
-			if err := delIdx.Commit(pebble.Sync); err != nil {
-				log.Fatalf("delete commit (index): %v", err)
+			rev, err := strconv.ParseInt(parts[0], 10, 64)
+			if err != nil {
+				continue
 			}
-			delPin.Reset()
-			delIdx.Reset()
-			log.Printf("deleted %d expired entries so far...", deleted)
+			sortTime := maxInt64 - rev
+			if sortTime >= cutoff {
+				kept++
+				continue // 之后都是新数据
+			}
+			pinId := parts[1]
+			delPin.Delete([]byte(pinId), nil)
+			delIdx.Delete(idxIt.Key(), nil)
+			deleted++
+			if deleted%10000 == 0 {
+				if err := delPin.Commit(pebble.Sync); err != nil {
+					log.Fatalf("delete commit (pins): %v", err)
+				}
+				if err := delIdx.Commit(pebble.Sync); err != nil {
+					log.Fatalf("delete commit (index): %v", err)
+				}
+				delPin.Reset()
+				delIdx.Reset()
+				log.Printf("deleted %d expired entries so far...", deleted)
+			}
 		}
+		idxIt.Close()
+		if err := delPin.Commit(pebble.Sync); err != nil {
+			log.Fatalf("final delete commit (pins): %v", err)
+		}
+		if err := delIdx.Commit(pebble.Sync); err != nil {
+			log.Fatalf("final delete commit (index): %v", err)
+		}
+		delPin.Close()
+		delIdx.Close()
+		log.Printf("phase2 done: deleted=%d keptNewer=%d (ttl=%dh, cutoff=%d)", deleted, kept, *ttlHours, cutoff)
 	}
-	idxIt.Close()
-	if err := delPin.Commit(pebble.Sync); err != nil {
-		log.Fatalf("final delete commit (pins): %v", err)
-	}
-	if err := delIdx.Commit(pebble.Sync); err != nil {
-		log.Fatalf("final delete commit (index): %v", err)
-	}
-	delPin.Close()
-	delIdx.Close()
-	log.Printf("phase2 done: deleted=%d keptNewer=%d (ttl=%dh, cutoff=%d)", deleted, kept, *ttlHours, cutoff)
 
 	idxDB.Close()
 	pinDB.Close()
