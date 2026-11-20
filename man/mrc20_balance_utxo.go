@@ -53,13 +53,11 @@ func CalculateBalanceFromUTXO(chain, address, tickId string) (*MRC20Balance, err
 			// 可用余额
 			balance.Balance = balance.Balance.Add(utxo.AmtChange)
 			balance.AvailableUtxos++
-			log.Printf("[Balance] Available UTXO: %s, amt=%s, balance=%s", utxo.TxPoint, utxo.AmtChange, balance.Balance)
 
 		case mrc20.UtxoStatusMintPending:
 			// Mint pending in (mempool中等待确认的mint)
 			balance.PendingIn = balance.PendingIn.Add(utxo.AmtChange)
 			balance.PendingUtxos++
-			log.Printf("[Balance] MintPending UTXO: %s, amt=%s, pendingIn=%s", utxo.TxPoint, utxo.AmtChange, balance.PendingIn)
 
 		case mrc20.UtxoStatusTeleportPending:
 			// Teleport pending: 资金还在链上等待跃迁，同时计入balance和pendingOut
@@ -67,7 +65,6 @@ func CalculateBalanceFromUTXO(chain, address, tickId string) (*MRC20Balance, err
 			balance.Balance = balance.Balance.Add(utxo.AmtChange)
 			balance.PendingOut = balance.PendingOut.Add(utxo.AmtChange)
 			balance.PendingUtxos++
-			log.Printf("[Balance] TeleportPending UTXO: %s, amt=%s, balance=%s, pendingOut=%s", utxo.TxPoint, utxo.AmtChange, balance.Balance, balance.PendingOut)
 
 		case mrc20.UtxoStatusTransferPending:
 			// Transfer pending: 通过AmtChange正负区分输入/输出UTXO
@@ -81,19 +78,12 @@ func CalculateBalanceFromUTXO(chain, address, tickId string) (*MRC20Balance, err
 				balance.Balance = balance.Balance.Add(absAmount)
 				balance.PendingOut = balance.PendingOut.Add(absAmount)
 				balance.PendingUtxos++
-				log.Printf("[Balance] TransferPending Input UTXO: %s, amt=%s, balance=%s, pendingOut=%s", utxo.TxPoint, utxo.AmtChange, balance.Balance, balance.PendingOut)
-			} else {
-				log.Printf("[Balance] TransferPending Output UTXO (skipped): %s, amt=%s", utxo.TxPoint, utxo.AmtChange)
 			}
 			// 输出UTXO（AmtChange > 0）不计入余额，通过TransferPendingIn处理
 
 		case mrc20.UtxoStatusSpent:
 			// 已花费，不计入余额
-			log.Printf("[Balance] Spent UTXO (skipped): %s, amt=%s", utxo.TxPoint, utxo.AmtChange)
 			continue
-
-		default:
-			log.Printf("[Balance] Unknown UTXO status: %d, txPoint=%s", utxo.Status, utxo.TxPoint)
 		}
 
 		// 记录Tick名称（第一次获取）
@@ -137,16 +127,11 @@ func CalculateBalanceFromUTXO(chain, address, tickId string) (*MRC20Balance, err
 		tickInfo, err := PebbleStore.GetMrc20TickInfo(tickId, "")
 		if err == nil {
 			balance.Tick = tickInfo.Tick
-		} else {
-			log.Printf("[Balance] Warning: unable to get tick name for tickId=%s: %v", tickId, err)
 		}
 	}
 
 	// 4. 计算总额
 	balance.Total = balance.Balance.Add(balance.PendingOut).Add(balance.PendingIn)
-
-	log.Printf("[Balance] Calculated from UTXO: chain=%s, address=%s, tick=%s, balance=%s, pendingOut=%s, pendingIn=%s, utxos=%d",
-		chain, address, balance.Tick, balance.Balance, balance.PendingOut, balance.PendingIn, balance.AvailableUtxos)
 
 	return balance, nil
 }
