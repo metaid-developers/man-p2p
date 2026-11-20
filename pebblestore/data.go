@@ -1,13 +1,11 @@
 package pebblestore
 
 import (
-	"container/heap"
 	"context"
 	"fmt"
 	"log"
 	"man-p2p/common"
 	"man-p2p/pin"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -274,41 +272,6 @@ func (db *Database) SetMempool(pinNode *pin.PinInscription) error {
 
 const maxMempoolListSummaryBytes = 4096
 
-type mempoolCandidate struct {
-	sortTime int64
-	id       string
-	pinNode  *pin.PinInscription
-}
-
-type mempoolMinHeap []mempoolCandidate
-
-func (h mempoolMinHeap) Len() int {
-	return len(h)
-}
-
-func (h mempoolMinHeap) Less(i, j int) bool {
-	if h[i].sortTime == h[j].sortTime {
-		return h[i].id < h[j].id
-	}
-	return h[i].sortTime < h[j].sortTime
-}
-
-func (h mempoolMinHeap) Swap(i, j int) {
-	h[i], h[j] = h[j], h[i]
-}
-
-func (h *mempoolMinHeap) Push(x interface{}) {
-	*h = append(*h, x.(mempoolCandidate))
-}
-
-func (h *mempoolMinHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[:n-1]
-	return x
-}
-
 func boundedMempoolListSummary(value string) string {
 	if len(value) > maxMempoolListSummaryBytes {
 		value = value[:maxMempoolListSummaryBytes]
@@ -355,84 +318,68 @@ func (db *Database) GetMempoolPageList(ctx context.Context, page int64, size int
 	if page > maxMempoolStorageOffset/size {
 		return []*pin.PinInscription{}, nil
 	}
-	limit := int((page + 1) * size)
-	if limit <= 0 {
-		return []*pin.PinInscription{}, nil
-	}
 
-	// 过期索引在独立 MempoolExpiryDb 中，本迭代无需边界排除
-	iter, err := db.PinsMempoolDb.NewIter(nil)
+	// R1 后置优化：过期索引 MempoolExpiryDb 按 sortTime 反向时间戳排列，
+	// 升序迭代 = 最新在前。按索引序定位当页（跳过 page*size 行、取 size 行）
+	// 后逐行点查 PinsMempoolDb —— 每请求 O(page*size + size) 点查，
+	// 与活条目总量无关（旧堆实现全量读值，2.5G 活数据下单请求 ~1.6s）。
+	// 存量过渡窗口（回填前的节点）索引缺行时页行数偏少，可接受；
+	// 索引在、数据被确认清理路径先行删除的孤儿行静默跳过。
+	idxIter, err := db.MempoolExpiryDb.NewIter(nil)
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
 
-	candidates := &mempoolMinHeap{}
-	heap.Init(candidates)
-	for iter.First(); iter.Valid(); iter.Next() {
+	skip := int(page * size)
+	var pinIds []string
+	for idxIter.First(); idxIter.Valid() && len(pinIds) < int(size); idxIter.Next() {
+		select {
+		case <-ctx.Done():
+			idxIter.Close()
+			return nil, ctx.Err()
+		default:
+		}
+		_, pinId, ok := ParseMempoolExpiryKey(idxIter.Key())
+		if !ok {
+			continue
+		}
+		if skip > 0 {
+			skip--
+			continue
+		}
+		pinIds = append(pinIds, pinId)
+	}
+	idxIter.Close()
+
+	result := make([]*pin.PinInscription, 0, len(pinIds))
+	for _, id := range pinIds {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-
-		// 直接使用 mempool 存量 JSON（SetMempool 写入完整 pin），
-		// 不再逐条跨库回查主 pins 分片——旧实现对 N 条 mempool 做
-		// N 次跨库 Get + unmarshal，且主库无此 pin 时整条跳过（R1 修复）
+		data, closer, err := db.PinsMempoolDb.Get([]byte(id))
+		if err != nil {
+			continue
+		}
 		var pinNode pin.PinInscription
-		if err := sonic.Unmarshal(CloneBytes(iter.Value()), &pinNode); err != nil {
+		if err := sonic.Unmarshal(data, &pinNode); err != nil {
 			// 空 value（旧版写入形态，存量回填工具会删除）：静默跳过防日志洪流；
 			// 非空坏数据才记日志
-			if len(iter.Value()) > 0 {
-				log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", string(iter.Key()), err)
+			if len(data) > 0 {
+				log.Printf("[WARN] mempool pagination skipped corrupt pin id=%s: %v", id, err)
 			}
+			closer.Close()
 			continue
 		}
+		closer.Close()
 		if pinNode.Id == "" {
-			pinNode.Id = string(iter.Key())
+			pinNode.Id = id
 		}
 		trimMempoolPinForList(&pinNode)
-
-		candidate := mempoolCandidate{
-			sortTime: pin.EffectiveSortTime(&pinNode),
-			id:       pinNode.Id,
-			pinNode:  &pinNode,
-		}
-		if candidates.Len() < limit {
-			heap.Push(candidates, candidate)
-			continue
-		}
-		worst := (*candidates)[0]
-		if candidate.sortTime > worst.sortTime || candidate.sortTime == worst.sortTime && candidate.id > worst.id {
-			heap.Pop(candidates)
-			heap.Push(candidates, candidate)
-		}
+		result = append(result, &pinNode)
 	}
-
-	result := make([]*pin.PinInscription, 0, candidates.Len())
-	for candidates.Len() > 0 {
-		candidate := heap.Pop(candidates).(mempoolCandidate)
-		result = append(result, candidate.pinNode)
-	}
-
-	sort.SliceStable(result, func(i, j int) bool {
-		a := pin.EffectiveSortTime(result[i])
-		b := pin.EffectiveSortTime(result[j])
-		if a == b {
-			return result[i].Id > result[j].Id
-		}
-		return a > b
-	})
-
-	start := int(page * size)
-	if start >= len(result) {
-		return []*pin.PinInscription{}, nil
-	}
-	end := start + int(size)
-	if end > len(result) {
-		end = len(result)
-	}
-	return result[start:end], nil
+	return result, nil
 }
 func (db *Database) GetMempool(key string) ([]byte, error) {
 	result, closer, err := db.PinsMempoolDb.Get([]byte(key))

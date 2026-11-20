@@ -145,7 +145,9 @@ func TestGetMempoolPageListKeepsOnlyRequestedWindow(t *testing.T) {
 	db := newMempoolTestDB(t)
 	for i := 0; i < 1000; i++ {
 		id := fmt.Sprintf("pin-%04d", i)
-		insertMempoolPin(t, db, id, int64(i), "")
+		// seenTime 从 1 起：0 值会触发 SetMempool 的 now 兜底（索引按 now 排序），
+		// 破坏本测试依赖的纯 seenTime 排序假设
+		insertMempoolPin(t, db, id, int64(i)+1, "")
 	}
 
 	list, err := db.GetMempoolPageList(context.Background(), 9, 25)
