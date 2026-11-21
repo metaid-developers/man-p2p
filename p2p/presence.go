@@ -206,6 +206,8 @@ func (r *presenceRuntime) applyDefaults() {
 }
 
 func (r *presenceRuntime) receiveLoop() {
+	// R3：缓存/回调 panic 不杀进程（recover 在循环体外，panic 后本循环退出）
+	defer recoverPanic("presence.receiveLoop")
 	for {
 		msg, err := r.sub.Next(r.ctx)
 		if err != nil {
@@ -234,6 +236,7 @@ func (r *presenceRuntime) startBroadcastLoop() {
 	r.broadcastMu.Unlock()
 
 	go func() {
+		defer recoverPanic("presence.broadcastLoop")
 		defer func() {
 			r.broadcastMu.Lock()
 			r.broadcastStarted = false

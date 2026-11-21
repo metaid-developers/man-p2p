@@ -77,7 +77,10 @@ func InitHost(ctx context.Context, dataDir string) error {
 		return fmt.Errorf("dht.Bootstrap: %w", err)
 	}
 
-	go connectBootstrapNodes(ctx)
+	go func() {
+		defer recoverPanic("bootstrap.connectLoop")
+		connectBootstrapNodes(ctx)
+	}()
 	go InitMDNS(ctx)
 	return nil
 }

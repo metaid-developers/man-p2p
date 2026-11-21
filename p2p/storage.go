@@ -16,6 +16,7 @@ var (
 
 func StartStorageMonitor(ctx context.Context, dataDir string) {
 	go func() {
+		defer recoverPanic("storage.monitor")
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 		checkStorage(dataDir)
@@ -84,7 +85,7 @@ func GetStatus() map[string]interface{} {
 			}
 			return "p2p-only"
 		}(),
-		"peerId":     peerID,
+		"peerId":      peerID,
 		"listenAddrs": listenAddrs,
 	}
 }

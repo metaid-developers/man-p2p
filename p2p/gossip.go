@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -12,16 +11,16 @@ import (
 const TopicName = "metaid-pins"
 
 type PinAnnouncement struct {
-	PinId     string `json:"pinId"`
-	Path      string `json:"path"`
-	Address   string `json:"address"`
-	MetaId    string `json:"metaId"`
-	ChainName string `json:"chainName"`
-	Timestamp int64  `json:"timestamp"`
-	GenesisHeight int64 `json:"genesisHeight"`
-	Confirmed bool   `json:"confirmed"`
-	SizeBytes int64  `json:"sizeBytes"`
-	PeerID    string `json:"peerId"`
+	PinId         string `json:"pinId"`
+	Path          string `json:"path"`
+	Address       string `json:"address"`
+	MetaId        string `json:"metaId"`
+	ChainName     string `json:"chainName"`
+	Timestamp     int64  `json:"timestamp"`
+	GenesisHeight int64  `json:"genesisHeight"`
+	Confirmed     bool   `json:"confirmed"`
+	SizeBytes     int64  `json:"sizeBytes"`
+	PeerID        string `json:"peerId"`
 }
 
 var (
@@ -61,6 +60,9 @@ func PublishPin(ctx context.Context, ann PinAnnouncement) error {
 }
 
 func receiveLoop(ctx context.Context) {
+	// R3：回调（StorePinFn/StorePinMetadataOnlyFn 等来自 man 包）panic 不再杀死进程。
+	// recover 在循环体外：panic 后本循环退出（pubsub 订阅随之失效），进程存活。
+	defer recoverPanic("gossip.receiveLoop")
 	for {
 		msg, err := sub.Next(ctx)
 		if err != nil {
@@ -71,7 +73,7 @@ func receiveLoop(ctx context.Context) {
 		}
 		var ann PinAnnouncement
 		if err := json.Unmarshal(msg.Data, &ann); err != nil {
-			log.Printf("gossip: bad message from %s: %v", msg.ReceivedFrom, err)
+			logBadGossipMessage(msg.ReceivedFrom, err)
 			continue
 		}
 		HandleIncomingAnnouncement(ctx, ann)
