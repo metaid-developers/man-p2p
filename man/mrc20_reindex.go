@@ -106,6 +106,42 @@ func (pd *PebbleData) GetBlockCreatedUtxos(chain string, height int64) ([]string
 	return txPoints, nil
 }
 
+// SaveBlockSpentRecord 记录区块消耗的 UTXO（value 为完整 UTXO JSON）。
+// 供硬删除路径（teleport 源 UTXO）回滚使用：CleanBlock 恢复时主键已不存在，
+// 从该记录的 JSON 重建。软标记路径（MarkUtxoAsSpent）沿用 "1" 值 + 主键翻状态，
+// 两条路径在 CleanBlock 恢复循环中统一处理（见 restoreHardDeletedUtxoFromBlockSpent）。
+func (pd *PebbleData) SaveBlockSpentRecord(chain string, height int64, txPoint string, utxo *mrc20.Mrc20Utxo) error {
+	if chain == "" {
+		return nil
+	}
+	data, err := sonic.Marshal(utxo)
+	if err != nil {
+		return err
+	}
+	key := []byte(fmt.Sprintf("block_spent_%s_%d_%s", chain, height, txPoint))
+	return pd.Database.MrcDb.Set(key, data, pebble.Sync)
+}
+
+// restoreHardDeletedUtxoFromBlockSpent 硬删除行的回滚数据源：读取 block_spent
+// value，若为 JSON（SaveBlockSpentRecord 写入）则返回该 UTXO（Status=-1，
+// 交给 restoreSpentUtxo 翻回可用并重建主键/索引）；旧格式 "1" 或无法解析返回 nil。
+func (pd *PebbleData) restoreHardDeletedUtxoFromBlockSpent(chain string, height int64, txPoint string) *mrc20.Mrc20Utxo {
+	key := []byte(fmt.Sprintf("block_spent_%s_%d_%s", chain, height, txPoint))
+	value, closer, err := pd.Database.MrcDb.Get(key)
+	if err != nil {
+		return nil
+	}
+	defer closer.Close()
+	var utxo mrc20.Mrc20Utxo
+	if err := sonic.Unmarshal(value, &utxo); err != nil {
+		return nil // 旧格式 "1"：非 JSON
+	}
+	if utxo.Status != mrc20.UtxoStatusSpent || utxo.TxPoint != txPoint {
+		return nil
+	}
+	return &utxo
+}
+
 // GetBlockSpentUtxos 获取某区块消耗的所有 UTXO TxPoint
 func (pd *PebbleData) GetBlockSpentUtxos(chain string, height int64) ([]string, error) {
 	prefix := []byte(fmt.Sprintf("block_spent_%s_%d_", chain, height))
@@ -176,7 +212,14 @@ func (pd *PebbleData) CleanBlock(chain string, height int64) (affectedAddresses 
 	for _, txPoint := range spentTxPoints {
 		utxo, err := pd.GetMrc20UtxoByTxPoint(txPoint, false)
 		if err != nil || utxo == nil {
-			continue
+			// 硬删除路径（teleport 源 UTXO，R2b）：主键不在，从 block_spent
+			// value 的 JSON 重建恢复；旧格式 "1" 且主键缺失则仅清索引
+			utxo = pd.restoreHardDeletedUtxoFromBlockSpent(chain, height, txPoint)
+			if utxo == nil {
+				blockSpentKey := []byte(fmt.Sprintf("block_spent_%s_%d_%s", chain, height, txPoint))
+				pd.Database.MrcDb.Delete(blockSpentKey, pebble.Sync)
+				continue
+			}
 		}
 
 		// 记录受影响的地址
@@ -258,6 +301,12 @@ func (pd *PebbleData) restoreSpentUtxo(utxo *mrc20.Mrc20Utxo) error {
 		batch.Set(inKey, data, pebble.Sync)
 	}
 
+	// From 副本同步恢复（硬删路径 DeleteMrc20Utxo 会连 From 副本一起删）
+	if utxo.FromAddress != "" && utxo.FromAddress != utxo.ToAddress {
+		fromInKey := []byte(fmt.Sprintf("mrc20_in_%s_%s_%s", utxo.FromAddress, utxo.Mrc20Id, utxo.TxPoint))
+		batch.Set(fromInKey, data, pebble.Sync)
+	}
+
 	// 恢复 available_utxo 索引
 	if utxo.Chain != "" && utxo.ToAddress != "" {
 		availableKey := []byte(fmt.Sprintf("available_utxo_%s_%s_%s_%s", utxo.Chain, utxo.ToAddress, utxo.Mrc20Id, utxo.TxPoint))
@@ -267,10 +316,72 @@ func (pd *PebbleData) restoreSpentUtxo(utxo *mrc20.Mrc20Utxo) error {
 	return batch.Commit(pebble.Sync)
 }
 
+// mrc20TxIndexKeys 返回流水记录的全部索引 key（与 SaveMrc20Transaction 写入格式一致）。
+// blockHeightStr 与写入侧相同：-1 用 mempool 哨兵 "999999999999"，其余 %012d。
+func mrc20TxIndexKeys(tx *mrc20.Mrc20Transaction) []string {
+	blockHeightStr := "999999999999"
+	if tx.BlockHeight != -1 {
+		blockHeightStr = fmt.Sprintf("%012d", tx.BlockHeight)
+	}
+	keys := []string{fmt.Sprintf("tx_tick_%s_%s_%012d_%s", tx.TickId, blockHeightStr, tx.Timestamp, tx.TxPoint)}
+	if tx.Address != "" {
+		keys = append(keys, fmt.Sprintf("tx_addr_%s_%s_%s_%012d_%s", tx.Address, tx.TickId, blockHeightStr, tx.Timestamp, tx.TxPoint))
+	}
+	if tx.TxId != "" {
+		keys = append(keys, fmt.Sprintf("tx_txid_%s_%s", tx.TxId, tx.TxPoint))
+	}
+	return keys
+}
+
+// deleteMrc20TransactionsFromHeight 删除某链 BlockHeight >= targetHeight 的全部
+// Transaction 流水（主键 + tx_tick_/tx_addr_/tx_txid_ 索引），返回删除条数。
+// 供 ReindexFromHeight Step5 使用；扫描 tx_ 全命名空间，索引行 value 非注入销。
+func (pd *PebbleData) deleteMrc20TransactionsFromHeight(chain string, targetHeight int64) (int, error) {
+	prefix := []byte("tx_")
+	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: append(prefix, 0xff),
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer iter.Close()
+
+	batch := pd.Database.MrcDb.NewBatch()
+	defer batch.Close()
+
+	deleted := 0
+	for iter.First(); iter.Valid(); iter.Next() {
+		var tx mrc20.Mrc20Transaction
+		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &tx); err != nil {
+			continue
+		}
+
+		if tx.Chain == chain && tx.BlockHeight >= targetHeight {
+			batch.Delete(iter.Key(), pebble.Sync) // 主键 tx_{txPoint}
+			for _, k := range mrc20TxIndexKeys(&tx) {
+				batch.Delete([]byte(k), pebble.Sync)
+			}
+			deleted++
+		}
+	}
+
+	if err := batch.Commit(pebble.Sync); err != nil {
+		return 0, err
+	}
+	if deleted > 0 {
+		log.Printf("[ReindexFrom] deleteMrc20TransactionsFromHeight chain=%s targetHeight>=%d deleted=%d txs (+indexes)", chain, targetHeight, deleted)
+	}
+	return deleted, nil
+}
+
 // deleteBlockTransactions 删除某区块的所有 Transaction 记录
+// R2b 修复：主键实际是 tx_{txPoint}（旧实现扫 mrc20_tx_ 恒为空，区块流水从未被删）；
+// 删除主键同时连带删除 tx_tick_/tx_addr_/tx_txid_ 三个索引。
+// 注意 tx_ 前缀同时覆盖三个索引命名空间，索引行 value 为主键字节串（非 JSON），
+// unmarshal 失败被跳过，索引行经 mrc20TxIndexKeys 确定性重建删除。
 func (pd *PebbleData) deleteBlockTransactions(chain string, height int64) error {
-	// 扫描 mrc20_tx_ 前缀，找到 BlockHeight 匹配的记录
-	prefix := []byte("mrc20_tx_")
+	prefix := []byte("tx_")
 	iter, err := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
 		LowerBound: prefix,
 		UpperBound: append(prefix, 0xff),
@@ -283,6 +394,7 @@ func (pd *PebbleData) deleteBlockTransactions(chain string, height int64) error 
 	batch := pd.Database.MrcDb.NewBatch()
 	defer batch.Close()
 
+	deleted := 0
 	for iter.First(); iter.Valid(); iter.Next() {
 		var tx mrc20.Mrc20Transaction
 		if err := sonic.Unmarshal(pebblestore.CloneBytes(iter.Value()), &tx); err != nil {
@@ -290,10 +402,17 @@ func (pd *PebbleData) deleteBlockTransactions(chain string, height int64) error 
 		}
 
 		if tx.Chain == chain && tx.BlockHeight == height {
-			batch.Delete(iter.Key(), pebble.Sync)
+			batch.Delete(iter.Key(), pebble.Sync) // 主键 tx_{txPoint}
+			for _, k := range mrc20TxIndexKeys(&tx) {
+				batch.Delete([]byte(k), pebble.Sync)
+			}
+			deleted++
 		}
 	}
 
+	if deleted > 0 {
+		log.Printf("[CleanBlock] deleteBlockTransactions chain=%s height=%d deleted=%d txs (+indexes)", chain, height, deleted)
+	}
 	return batch.Commit(pebble.Sync)
 }
 
@@ -698,24 +817,10 @@ func (pd *PebbleData) ReindexFromHeight(chain string, targetHeight int64) (stats
 	}
 
 	// Step 5: 清理 Transaction 流水记录（>= targetHeight）
-	txPrefix := []byte(fmt.Sprintf("tx_%s_", chain))
-	txIter, _ := pd.Database.MrcDb.NewIter(&pebble.IterOptions{
-		LowerBound: txPrefix,
-		UpperBound: append(txPrefix, 0xff),
-	})
-	if txIter != nil {
-		for txIter.First(); txIter.Valid(); txIter.Next() {
-			var tx mrc20.Mrc20Transaction
-			if err := sonic.Unmarshal(pebblestore.CloneBytes(txIter.Value()), &tx); err != nil {
-				continue
-			}
-			if tx.BlockHeight >= targetHeight {
-				key := make([]byte, len(txIter.Key()))
-				copy(key, txIter.Key())
-				pd.Database.MrcDb.Delete(key, pebble.Sync)
-			}
-		}
-		txIter.Close()
+	// R2b 修复：主键是 tx_{txPoint}（旧实现扫 tx_{chain}_ 恒为空），
+	// 且需按 tx.Chain 过滤（前缀不再携带链名），连带删除三个索引
+	if _, err := pd.deleteMrc20TransactionsFromHeight(chain, targetHeight); err != nil {
+		log.Printf("[WARN] ReindexFromHeight: deleteMrc20TransactionsFromHeight failed: %v", err)
 	}
 
 	// Step 5.1: 清理 PendingTeleport 表
