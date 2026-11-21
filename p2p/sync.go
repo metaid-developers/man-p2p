@@ -102,12 +102,18 @@ func FetchPin(ctx context.Context, peerID peer.ID, pinId string) (*PinResponse, 
 	return &resp, nil
 }
 
-func HandleIncomingAnnouncement(ctx context.Context, ann PinAnnouncement) {
+// HandleIncomingAnnouncement 处理一条 pin 公告：拉取并写库。
+// R3：返回 error 驱动 gossip 流水线的有界退避重试（语义性跳过——storage
+// 满额、ShouldSync 过滤、超大内容走 metadata-only、坏公告——返回 nil）。
+func HandleIncomingAnnouncement(ctx context.Context, ann PinAnnouncement) error {
+	if currentNode() == nil {
+		return nil // p2p host 未初始化（进程关闭中/测试环境）
+	}
 	if storageLimitReached.Load() {
-		return
+		return nil
 	}
 	if !ShouldSync(ann) {
-		return
+		return nil
 	}
 
 	cfg := GetConfig()
@@ -115,24 +121,27 @@ func HandleIncomingAnnouncement(ctx context.Context, ann PinAnnouncement) {
 		if StorePinMetadataOnlyFn != nil {
 			if err := StorePinMetadataOnlyFn(ann); err != nil {
 				log.Printf("sync: store metadata-only for %s failed: %v", ann.PinId, err)
+				return err
 			}
 		}
-		return
+		return nil
 	}
 
 	peerID, err := peer.Decode(ann.PeerID)
 	if err != nil {
 		log.Printf("sync: invalid peer ID %s: %v", ann.PeerID, err)
-		return
+		return nil // 坏公告重试无意义
 	}
 	resp, err := FetchPin(ctx, peerID, ann.PinId)
 	if err != nil {
 		log.Printf("sync: fetch %s from %s failed: %v", ann.PinId, peerID, err)
-		return
+		return err
 	}
 	if StorePinFn != nil {
 		if err := StorePinFn(resp); err != nil {
 			log.Printf("sync: store %s failed: %v", ann.PinId, err)
+			return err
 		}
 	}
+	return nil
 }
