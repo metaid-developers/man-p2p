@@ -68,9 +68,9 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 		tmp := (*pinList)[0]
 		blockKey := fmt.Sprintf("blocktime_%s_%d", chainName, height)
 		pd.Database.CountSet(blockKey, tmp.Timestamp)
-		// Broadcast new PINs via P2P GossipSub
+		// Broadcast new PINs via P2P GossipSub（R3：失败不再静默，采样告警）
 		for _, pinNode := range *pinList {
-			p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
+			if err := p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
 				PinId:         pinNode.Id,
 				Path:          pinNode.Path,
 				Address:       pinNode.Address,
@@ -80,7 +80,9 @@ func (pd *PebbleData) DoIndexerRun(chainName string, height int64, reIndex bool)
 				GenesisHeight: pinNode.GenesisHeight,
 				Confirmed:     pinNode.GenesisHeight > 0,
 				SizeBytes:     int64(pinNode.ContentLength),
-			})
+			}); err != nil {
+				p2p.LogPublishError(pinNode.Id, err)
+			}
 		}
 	}
 

@@ -15,7 +15,14 @@
   - 余额/holders/流水三条读路径从 `mrc20_utxo_` 全库扫描切到 `mrc20_in_` 定向前缀（holders 余额口径=Balance 字段跨链求和，等价复刻）
   - CheckOperationtx(All)：SaveMrc20Pin 写 `mrc20_op_tx_{txId}_{txPoint}` 前缀索引，读侧定向命中 + 存量无索引时回退全扫（语义与旧对硬删行不可见一致）
   - 调查中发现但**不在 R2 范围、仅上报**的存量 bug：`deleteBlockTransactions` 扫 `mrc20_tx_` 前缀而流水主键是 `tx_`（reindex.go:269，恒空）；`ReindexFromHeight` Step5 扫 `tx_{chain}_` 同样匹配不到（reindex.go:697）；teleport 硬删路径不写 block_spent_（不可回滚）。
-- R3（p2p 健壮性）、R4（结构优化）：未开始。
+- **R3 p2p 健壮性：代码完成（分支 `perf/optimize-r3`），待发布。**
+  - ROB-2 panic 隔离：gossip/presence 接收循环、broadcast、storage monitor、bootstrap 循环、sync stream handler 全部 recover（4309329）
+  - ROB-3 stream 硬化：sync handler 30s deadline + GetPinFn nil 守卫；FetchPin 30s 超时 + 32MB 解码上限；坏消息日志按来源限流（4309329）
+  - ROB-1 gossip 流水线：接收与处理解耦——4 worker 池 + 64 有界队列（队列满丢弃告警）+ pinId 去重缓存（5min TTL/10k 上限）+ HandleIncomingAnnouncement 返回 error 驱动有界退避重试（2 次退避 2s/8s）（58414be）
+  - ROB-4 bootstrap：尊重 libp2p 退避（不再每 2s 硬拨+清除退避）、去掉内层 15×2s 双层重试、失败日志每分钟每节点一条（97e0be7）
+  - ROB-5 发布可观测：PublishPin 两处吞错点接入 LogPublishError（首败+每 100 次告警）（97e0be7）
+  - 测试：去重缓存/错误返回驱动重试/重启对端重连（等待窗放宽到退避量级）回归；全量失败集与基线一致
+- R4（结构优化）：未开始。
 
 ---
 
