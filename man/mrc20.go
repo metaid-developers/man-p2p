@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bitcoinsv/bsvutil"
 	bsvwire "github.com/bitcoinsv/bsvd/wire"
+	"github.com/bitcoinsv/bsvutil"
 	"github.com/btcsuite/btcd/btcutil"
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -1986,6 +1986,12 @@ func executeTeleportTransfer(pinNode *pin.PinInscription, data mrc20.Mrc20Telepo
 	mrc20UtxoList = append(mrc20UtxoList, &newUtxo)
 
 	// ========== 新架构：删除源 UTXO，更新余额，写入流水 ==========
+
+	// 0. 记录 block_spent（value 为完整 UTXO JSON，R2b 修复）：源 UTXO 走硬删除，
+	// 没有这条记录 CleanBlock 无法回滚该类花费
+	if err := PebbleStore.SaveBlockSpentRecord(pinNode.ChainName, pinNode.GenesisHeight, spentUtxo.TxPoint, &spentUtxo); err != nil {
+		log.Printf("[ERROR] SaveBlockSpentRecord failed for teleport source %s: %v", spentUtxo.TxPoint, err)
+	}
 
 	// 1. 删除源链的 UTXO（从数据库中移除）
 	err := PebbleStore.DeleteMrc20Utxo(spentUtxo.TxPoint, spentUtxo.ToAddress, spentUtxo.Mrc20Id)
