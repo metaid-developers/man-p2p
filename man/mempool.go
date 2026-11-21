@@ -28,7 +28,8 @@ func handleMempoolPin(pinNode *pin.PinInscription) {
 	PebbleStore.Database.SetMempool(pinNode)
 	//增加PIN相关数据
 	PebbleStore.Database.SetAllPins(-1, []*pin.PinInscription{pinNode}, 20000)
-	_ = p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
+	// R3：发布失败不再静默（全网收不到该 pin），采样告警
+	if err := p2p.PublishPin(context.Background(), p2p.PinAnnouncement{
 		PinId:         pinNode.Id,
 		Path:          pinNode.Path,
 		Address:       pinNode.Address,
@@ -38,7 +39,9 @@ func handleMempoolPin(pinNode *pin.PinInscription) {
 		GenesisHeight: pinNode.GenesisHeight,
 		Confirmed:     false,
 		SizeBytes:     int64(pinNode.ContentLength),
-	})
+	}); err != nil {
+		p2p.LogPublishError(pinNode.Id, err)
+	}
 	//通知
 	handNotifcation(pinNode)
 

@@ -206,7 +206,9 @@ func waitForPeerDisconnection(t *testing.T, expected peer.ID, timeout time.Durat
 }
 
 func TestConnectBootstrapNodesRetriesUntilPeerBecomesAvailable(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// R3：不再清除 libp2p 拨号退避（尊重指数退避），对端起来后由外层
+	// ticker 在退避到期后自然连上——等待窗口放宽到退避量级。
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	originalNode := Node
@@ -263,7 +265,7 @@ func TestConnectBootstrapNodesRetriesUntilPeerBecomesAvailable(t *testing.T) {
 	}
 	defer bootstrapHost.Close()
 
-	waitForPeerConnection(t, bootstrapHost.ID(), 2*time.Second)
+	waitForPeerConnection(t, bootstrapHost.ID(), 15*time.Second)
 }
 
 func TestBootstrapReconnectLoopReconnectsAfterDisconnect(t *testing.T) {

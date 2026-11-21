@@ -20,7 +20,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	swarm "github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -229,6 +228,16 @@ func triggerBootstrapReconnect() {
 	}()
 }
 
+// bootstrapFailureState 记录每个 bootstrap 节点的连续失败状态，
+// 用于失败日志降采样（R3/ROB-4：旧实现每轮 15 条失败日志刷屏）。
+var (
+	bootstrapFailMu    sync.Mutex
+	bootstrapFailCount = map[peer.ID]int{}
+	bootstrapLastWarn  = map[peer.ID]time.Time{}
+)
+
+const bootstrapWarnInterval = 60 * time.Second
+
 func connectBootstrapNodesOnce(ctx context.Context) {
 	cfg := GetConfig()
 	for _, addrStr := range cfg.BootstrapNodes {
@@ -246,42 +255,35 @@ func connectBootstrapNodesOnce(ctx context.Context) {
 		if node == nil {
 			return
 		}
-		for attempt := 1; attempt <= bootstrapRetryAttempts; attempt++ {
-			node = currentNode()
-			if node == nil {
-				return
+		// R3：不再清除 libp2p 指数退避（旧实现每 2s 硬拨死节点），
+		// 单次尝试交给外层 ticker 重试；Connected 则跳过。
+		if node.Network().Connectedness(pi.ID) == network.Connected {
+			bootstrapFailMu.Lock()
+			delete(bootstrapFailCount, pi.ID)
+			bootstrapFailMu.Unlock()
+			continue
+		}
+		if err := node.Connect(ctx, *pi); err != nil {
+			bootstrapFailMu.Lock()
+			bootstrapFailCount[pi.ID]++
+			count := bootstrapFailCount[pi.ID]
+			last, hasLast := bootstrapLastWarn[pi.ID]
+			now := time.Now()
+			if !hasLast || now.Sub(last) >= bootstrapWarnInterval {
+				bootstrapLastWarn[pi.ID] = now
+				bootstrapFailMu.Unlock()
+				log.Printf("p2p: bootstrap connect failed to %s (consecutive=%d, next warn in %s): %v", pi.ID, count, bootstrapWarnInterval, err)
+			} else {
+				bootstrapFailMu.Unlock()
 			}
-			if node.Network().Connectedness(pi.ID) == network.Connected {
-				break
-			}
-			clearBootstrapDialBackoff(node, pi.ID)
-			err = node.Connect(ctx, *pi)
-			if err == nil {
-				log.Printf("p2p: bootstrap connected %s on attempt %d", pi.ID, attempt)
-				break
-			}
-			log.Printf("p2p: bootstrap connect failed to %s on attempt %d/%d: %v", pi.ID, attempt, bootstrapRetryAttempts, err)
-			if attempt == bootstrapRetryAttempts {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(bootstrapRetryInterval):
-			}
+		} else {
+			bootstrapFailMu.Lock()
+			delete(bootstrapFailCount, pi.ID)
+			delete(bootstrapLastWarn, pi.ID)
+			bootstrapFailMu.Unlock()
+			log.Printf("p2p: bootstrap connected %s", pi.ID)
 		}
 	}
-}
-
-func clearBootstrapDialBackoff(node host.Host, peerID peer.ID) {
-	if node == nil {
-		return
-	}
-	swarmNet, ok := node.Network().(*swarm.Swarm)
-	if !ok {
-		return
-	}
-	swarmNet.Backoff().Clear(peerID)
 }
 
 func currentNode() host.Host {
