@@ -8,13 +8,14 @@
 ## 执行状态（随批次更新）
 
 - **R0 安全止血：已发布生产（2026-11-20，`79c7bb3`，双节点）。** SEC-1/2/4/10 + SEC-3 止血（export 限流+并发闸门+maxPins 5000，保留公开不破验收）全部落地；adminToken 已配置强随机值（节点本地 `.admin-token`）。SEC-5 依赖的 PERF-1/2/3 见 R1。
-- **R1 性能止血：代码完成（分支 `perf/optimize-r1`），待发布后复测基准。**
-  - PERF-5 protocolList race → `0d16987`
-  - PERF-4 notifcation 边界迭代 + single-flight 清理 → `f695838`
-  - PERF-3 pin/list lastId 游标 + size/深度钳制 → `8e99a2b`（契约变化：page>5000 返回参数错误，深翻页走 lastId）
-  - PERF-1 mempool TTL 生命周期（mpexp_ 独立索引库 + 常驻 sweep 72h/10min）+ 读路径直读去跨库回查 + 离线回补工具 → `4e3dd73`（**发布后须在节点 2 停机跑 `tools/mempool_expiry_backfill -delete-expired` 清理 19GB 存量**）
-  - 待办：发布后按 perf-baseline.md §7 复测；SEC-5 的 nginx 限流仍未部署（INFRA-1）
-- R2（MRC20 索引重建）、R3（p2p 健壮性）、R4（结构优化）：未开始。
+- **R1 性能止血：已发布生产（2026-11-21，双节点 `2a462b1`，含存量清理）。** PERF-1/3/4/5 全落地；mempool/list 8005ms→2.7ms、pin/list 深页游标化、path/list 3.8 倍；复测对比见 perf-baseline.md §8。遗留：节点 1 mempool 库 ~1955 万条非空坏数据（不碍读路径，可选清理）；SEC-5 的 nginx 限流仍未部署（INFRA-1）。
+- **R2 MRC20 读路径定向索引：代码完成（分支 `perf/optimize-r2`），待发布。** 调查确认 `mrc20_in_{addr}_{tickId}_{txPoint}` 索引在全部写路径维护（仅 From 副本两处缺口），读路径切换无需回填：
+  - 余额热路径逐条日志删除（a87dc03）
+  - From 副本两处缺口修复（UpdateMrc20Utxo Spent 删 From / MarkUtxoAsSpent 刷 From）
+  - 余额/holders/流水三条读路径从 `mrc20_utxo_` 全库扫描切到 `mrc20_in_` 定向前缀（holders 余额口径=Balance 字段跨链求和，等价复刻）
+  - CheckOperationtx(All)：SaveMrc20Pin 写 `mrc20_op_tx_{txId}_{txPoint}` 前缀索引，读侧定向命中 + 存量无索引时回退全扫（语义与旧对硬删行不可见一致）
+  - 调查中发现但**不在 R2 范围、仅上报**的存量 bug：`deleteBlockTransactions` 扫 `mrc20_tx_` 前缀而流水主键是 `tx_`（reindex.go:269，恒空）；`ReindexFromHeight` Step5 扫 `tx_{chain}_` 同样匹配不到（reindex.go:697）；teleport 硬删路径不写 block_spent_（不可回滚）。
+- R3（p2p 健壮性）、R4（结构优化）：未开始。
 
 ---
 
